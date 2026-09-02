@@ -2,19 +2,33 @@
 
 import { Agent } from "./Agent.js";
 import { MemoryManager } from "./memoryManager.js";
-import { getEnvironment } from "../../config/environment.js";
+import { ToolExecutor } from "./toolExecutor.js";
+import {
+  getEnvironment
+} from "../../config/environment.js";
+import {
+  getAgentBudget
+} from "../../config/budgets.js";
+import {
+  TOOL_REGISTRY
+} from "../../tools/registry.js";
 
 const DEFAULT_TIMEOUT_MS = 25000;
 
-function createAbortSignal(timeoutMs) {
+function abortSignal(timeoutMs) {
   return AbortSignal.timeout(
-    Number(timeoutMs) > 0 ? Number(timeoutMs) : DEFAULT_TIMEOUT_MS
+    Number(timeoutMs) > 0
+      ? Number(timeoutMs)
+      : DEFAULT_TIMEOUT_MS
   );
 }
 
 export class AgentRuntime {
   constructor(options = {}) {
-    this.env = getEnvironment(options.env ?? {});
+    this.env = getEnvironment(
+      options.env ?? {}
+    );
+
     this.db = options.db ?? null;
     this.logger = options.logger ?? console;
 
@@ -22,6 +36,15 @@ export class AgentRuntime {
       options.memoryManager ??
       new MemoryManager({
         db: this.db,
+        logger: this.logger
+      });
+
+    this.toolExecutor =
+      options.toolExecutor ??
+      new ToolExecutor({
+        registry:
+          options.toolRegistry ??
+          TOOL_REGISTRY,
         logger: this.logger
       });
   }
@@ -37,203 +60,320 @@ export class AgentRuntime {
   async run({
     agentId,
     task,
-    context = {},
-    tools = {},
-    model = null
+    context = {}
   }) {
     const agent = this.createAgent(agentId);
 
-    if (!task || typeof task !== "string") {
-      throw new Error("A non-empty task is required.");
+    if (!task?.trim()) {
+      throw new Error("Task is required.");
     }
 
-    const budget = agent.getBudget();
+    const budget =
+      getAgentBudget(agentId);
 
-    const privateMemory = await this.memoryManager.getRelevant({
-      agentId: agent.id,
-      scope: agent.getMemoryScope(),
-      limit: 6
-    });
+    const privateMemory =
+      await this.memoryManager.getRelevant({
+        agentId,
+        scope: agent.getMemoryScope(),
+        limit: 6
+      });
 
     const companyMemory =
       await this.memoryManager.getCompanyMemory(5);
 
-    const systemPrompt = this.buildSystemPrompt(
-      agent,
-      privateMemory,
-      companyMemory
-    );
+    const systemPrompt =
+      this.buildSystemPrompt(
+        agent,
+        privateMemory,
+        companyMemory
+      );
 
-    const userPrompt = this.buildTaskPrompt({
-      agent,
-      task,
-      context
-    });
+    const initialUserPrompt =
+      this.buildTaskPrompt({
+        task,
+        context
+      });
 
-    return this.callLLM({
-      agent,
-      systemPrompt,
-      userPrompt,
-      model: model || agent.config.defaultModel,
-      budget,
-      tools
-    });
-  }
+    const tools =
+      this.toolExecutor
+        .getDefinitionsForAgent(agent);
 
-  buildSystemPrompt(
-    agent,
-    privateMemory = [],
-    companyMemory = []
-  ) {
-    return [
-      agent.buildSystemIdentity(),
-      "",
-      "PRIVATE AGENT MEMORY:",
-      this.memoryManager.formatForPrompt(privateMemory),
-      "",
-      "COMPANY MEMORY:",
-      this.memoryManager.formatForPrompt(companyMemory)
-    ].join("\n");
-  }
-
-  buildTaskPrompt({ agent, task, context }) {
-    const compactContext = this.compactContext(context);
-
-    return [
-      `Current task for ${agent.name}:`,
-      task,
-      "",
-      "Relevant context:",
-      compactContext || "None provided.",
-      "",
-      "Complete the task using available tools when necessary."
-    ].join("\n");
-  }
-
-  compactContext(context) {
-    if (!context || typeof context !== "object") {
-      return "";
-    }
-
-    return Object.entries(context)
-      .slice(0, 20)
-      .map(([key, value]) => {
-        const stringValue =
-          typeof value === "string"
-            ? value
-            : JSON.stringify(value);
-
-        return `${key}: ${String(stringValue).slice(0, 1500)}`;
-      })
-      .join("\n");
-  }
-
-  async callLLM({
-    agent,
-    systemPrompt,
-    userPrompt,
-    model,
-    budget,
-    tools = {}
-  }) {
-    const apiKey = this.env.OPENROUTER_API_KEY;
-
-    if (!apiKey) {
-      throw new Error("OPENROUTER_API_KEY is not configured.");
-    }
-
-    const selectedModel =
-      model ||
-      this.env.OPENROUTER_MODEL ||
-      "google/gemini-2.5-flash-preview:free";
-
-    const url =
-      `${this.env.OPENROUTER_BASE_URL}/chat/completions`;
-
-    const toolDefinitions = Object.values(tools)
-      .filter((tool) => tool?.definition)
-      .map((tool) => tool.definition);
-
-    const body = {
-      model: selectedModel,
-
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt
-        },
-        {
-          role: "user",
-          content: userPrompt
-        }
-      ],
-
-      temperature: 0.2,
-
-      max_tokens: budget.maxOutputTokens
-    };
-
-    if (toolDefinitions.length > 0) {
-      body.tools = toolDefinitions;
-      body.tool_choice = "auto";
-    }
-
-    const response = await fetch(url, {
-      method: "POST",
-
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-
-        "HTTP-Referer":
-          this.env.APP_URL ||
-          "https://dpdpready.online",
-
-        "X-Title":
-          this.env.APP_NAME ||
-          "DPDPReady AI"
+    const messages = [
+      {
+        role: "system",
+        content: systemPrompt
       },
+      {
+        role: "user",
+        content: initialUserPrompt
+      }
+    ];
 
-      body: JSON.stringify(body),
+    let llmCalls = 0;
+    let toolCalls = 0;
 
-      signal: createAbortSignal(
-        this.env.LLM_TIMEOUT_MS || DEFAULT_TIMEOUT_MS
-      )
-    });
+    while (
+      llmCalls < budget.maxLLMCallsPerTask
+    ) {
+      llmCalls += 1;
 
-    if (!response.ok) {
-      const errorText = await response.text();
+      const response =
+        await this.callLLM({
+          messages,
+          tools,
+          model:
+            this.env.OPENROUTER_MODEL,
+          maxTokens:
+            budget.maxOutputTokens
+        });
 
-      throw new Error(
-        `LLM request failed (${response.status}): ${errorText.slice(
-          0,
-          1000
-        )}`
-      );
-    }
+      const message =
+        response?.choices?.[0]?.message;
 
-    const data = await response.json();
+      if (!message) {
+        throw new Error(
+          "LLM returned no message."
+        );
+      }
 
-    const message = data?.choices?.[0]?.message;
+      messages.push(message);
 
-    if (!message) {
-      throw new Error(
-        "LLM returned no usable message."
-      );
+      const requestedToolCalls =
+        Array.isArray(message.tool_calls)
+          ? message.tool_calls
+          : [];
+
+      if (
+        requestedToolCalls.length === 0
+      ) {
+        return {
+          agent: agent.id,
+          agentName: agent.name,
+          content:
+            message.content ?? "",
+          model:
+            response.model ||
+            this.env.OPENROUTER_MODEL,
+          usage:
+            response.usage ?? null,
+          llmCalls,
+          toolCalls
+        };
+      }
+
+      for (
+        const toolCall
+        of requestedToolCalls
+      ) {
+        if (
+          toolCalls >=
+          budget.maxToolCallsPerTask
+        ) {
+          messages.push({
+            role: "tool",
+            tool_call_id:
+              toolCall.id,
+            content:
+              JSON.stringify({
+                ok: false,
+                error:
+                  "Tool-call budget exhausted."
+              })
+          });
+
+          break;
+        }
+
+        toolCalls += 1;
+
+        const functionName =
+          toolCall?.function?.name;
+
+        const functionArguments =
+          toolCall?.function?.arguments ??
+          "{}";
+
+        const result =
+          await this.toolExecutor.execute({
+            agent,
+            toolName:
+              functionName,
+            arguments:
+              functionArguments
+          });
+
+        messages.push({
+          role: "tool",
+          tool_call_id:
+            toolCall.id,
+          content:
+            JSON.stringify(
+              result
+            ).slice(0, 15000)
+        });
+      }
     }
 
     return {
       agent: agent.id,
+      agentName: agent.name,
+      content:
+        "I reached the task reasoning limit before completing the task.",
       model:
-        data.model ||
-        selectedModel,
-
-      message,
-
-      usage: data.usage || null,
-
-      finishReason:
-        data.choices?.[0]?.finish_reason || null
+        this.env.OPENROUTER_MODEL,
+      usage: null,
+      llmCalls,
+      toolCalls,
+      incomplete: true
     };
+  }
+
+  buildSystemPrompt(
+    agent,
+    privateMemory,
+    companyMemory
+  ) {
+    return [
+      agent.buildSystemIdentity(),
+      "",
+      "PRIVATE MEMORY:",
+      this.memoryManager.formatForPrompt(
+        privateMemory
+      ),
+      "",
+      "COMPANY MEMORY:",
+      this.memoryManager.formatForPrompt(
+        companyMemory
+      ),
+      "",
+      "TOOL POLICY:",
+      "- Use tools only when necessary.",
+      "- Never invent tool results.",
+      "- Never claim an action succeeded without verification.",
+      "- Stay within your permissions.",
+      "- Stop when the task is complete.",
+      "- Do not repeatedly call a tool for the same information."
+    ].join("\n");
+  }
+
+  buildTaskPrompt({
+    task,
+    context
+  }) {
+    return [
+      "TASK:",
+      task.trim(),
+      "",
+      "CONTEXT:",
+      this.compactContext(context),
+      "",
+      "Return a useful final answer when the task is complete."
+    ].join("\n");
+  }
+
+  compactContext(context) {
+    if (
+      !context ||
+      typeof context !== "object"
+    ) {
+      return "None.";
+    }
+
+    const parts = [];
+
+    for (
+      const [key, value]
+      of Object.entries(context).slice(0, 15)
+    ) {
+      let text;
+
+      try {
+        text =
+          typeof value === "string"
+            ? value
+            : JSON.stringify(value);
+      } catch {
+        text = String(value);
+      }
+
+      parts.push(
+        `${key}: ${String(text).slice(0, 1500)}`
+      );
+    }
+
+    return parts.length > 0
+      ? parts.join("\n")
+      : "None.";
+  }
+
+  async callLLM({
+    messages,
+    tools,
+    model,
+    maxTokens
+  }) {
+    const apiKey =
+      this.env.OPENROUTER_API_KEY;
+
+    if (!apiKey) {
+      throw new Error(
+        "OPENROUTER_API_KEY is not configured."
+      );
+    }
+
+    const body = {
+      model:
+        model ||
+        this.env.OPENROUTER_MODEL,
+      messages,
+      temperature: 0.2,
+      max_tokens: maxTokens
+    };
+
+    if (tools.length > 0) {
+      body.tools = tools;
+      body.tool_choice = "auto";
+    }
+
+    const response = await fetch(
+      `${this.env.OPENROUTER_BASE_URL}/chat/completions`,
+      {
+        method: "POST",
+
+        headers: {
+          "Authorization":
+            `Bearer ${apiKey}`,
+          "Content-Type":
+            "application/json",
+          "HTTP-Referer":
+            this.env.APP_URL ||
+            "https://dpdpready.online",
+          "X-Title":
+            this.env.APP_NAME ||
+            "DPDPReady AI"
+        },
+
+        body: JSON.stringify(body),
+
+        signal: abortSignal(
+          this.env.LLM_TIMEOUT_MS ||
+          DEFAULT_TIMEOUT_MS
+        )
+      }
+    );
+
+    if (!response.ok) {
+      const error =
+        await response.text();
+
+      throw new Error(
+        `OpenRouter error ${response.status}: ${error.slice(
+          0,
+          1500
+        )}`
+      );
+    }
+
+    return await response.json();
   }
 }
