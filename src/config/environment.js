@@ -1,75 +1,68 @@
 // src/config/environment.js
 
-const REQUIRED_SECRETS = [
-  "OPENROUTER_API_KEY",
-  "TELEGRAM_GROUP_ID"
-];
-
-const OPTIONAL_SECRETS = [
-  "OPS_BOT_TOKEN",
-  "GROWTH_BOT_TOKEN",
-  "RESEARCH_BOT_TOKEN",
-  "ANALYST_BOT_TOKEN",
-  "SUPPORT_BOT_TOKEN"
-];
-
 export function getEnvironment(env) {
-  if (!env || typeof env !== "object") {
-    throw new Error("Worker environment is unavailable.");
-  }
-
   return {
     ...env,
-    APP_NAME: env.APP_NAME || "DPDPReady AI",
-    BOT_HOST: env.BOT_HOST || "dpdpready-ai.workers.dev",
+
+    APP_NAME:
+      env.APP_NAME ||
+      "DPDPReady AI",
+
+    APP_URL:
+      env.APP_URL ||
+      "https://dpdpready.online",
+
+    BOT_HOST:
+      env.BOT_HOST ||
+      "dpdpready-ai.workers.dev",
 
     OPENROUTER_BASE_URL:
-      env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
+      env.OPENROUTER_BASE_URL ||
+      "https://openrouter.ai/api/v1",
 
     OPENROUTER_MODEL:
-      env.OPENROUTER_MODEL || "google/gemini-2.5-flash-preview:free",
+      env.OPENROUTER_MODEL ||
+      "google/gemini-2.5-flash-preview",
 
     OPENROUTER_FALLBACK_MODEL:
-      env.OPENROUTER_FALLBACK_MODEL || "openrouter/free"
+      env.OPENROUTER_FALLBACK_MODEL ||
+      "openrouter/free",
+
+    LLM_TIMEOUT_MS:
+      Number(
+        env.LLM_TIMEOUT_MS || 25000
+      )
   };
 }
 
-export function validateEnvironment(env, { strict = true } = {}) {
-  const missingRequired = REQUIRED_SECRETS.filter(
-    (key) => !env?.[key]
-  );
+export function validateEnvironment(
+  env,
+  { strict = true } = {}
+) {
+  const required = [
+    "OPENROUTER_API_KEY",
+    "TELEGRAM_GROUP_ID"
+  ];
 
-  if (strict && missingRequired.length > 0) {
+  const missing =
+    required.filter(
+      (key) => !env?.[key]
+    );
+
+  if (
+    strict &&
+    missing.length
+  ) {
     throw new Error(
-      `Missing required environment values: ${missingRequired.join(", ")}`
+      `Missing required environment values: ${missing.join(
+        ", "
+      )}`
     );
   }
 
   return {
-    valid: missingRequired.length === 0,
-    missingRequired,
-    optionalPresent: OPTIONAL_SECRETS.filter(
-      (key) => Boolean(env?.[key])
-    )
+    valid:
+      missing.length === 0,
+    missing
   };
-}
-
-export function getTelegramBotToken(env, agentConfig) {
-  const key = agentConfig?.telegramEnvKey;
-
-  if (!key) {
-    throw new Error(
-      `No Telegram token environment key configured for agent ${agentConfig?.id}`
-    );
-  }
-
-  const token = env?.[key];
-
-  if (!token) {
-    throw new Error(
-      `Missing Telegram bot token: ${key}`
-    );
-  }
-
-  return token;
 }
