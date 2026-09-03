@@ -3,19 +3,29 @@
 import { Agent } from "./Agent.js";
 import { MemoryManager } from "./memoryManager.js";
 import { ToolExecutor } from "./toolExecutor.js";
+
 import {
-  getEnvironment
+  getEnvironment,
 } from "../../config/environment.js";
+
 import {
-  getAgentBudget
+  getAgentBudget,
 } from "../../config/budgets.js";
+
 import {
-  TOOL_REGISTRY
+  createToolRegistry,
 } from "../../tools/registry.js";
 
-const DEFAULT_TIMEOUT_MS = 25000;
+import {
+  createApprovalController,
+} from "../../telegram/approvals.js";
 
-function abortSignal(timeoutMs) {
+const DEFAULT_TIMEOUT_MS =
+  25000;
+
+function abortSignal(
+  timeoutMs
+) {
   return AbortSignal.timeout(
     Number(timeoutMs) > 0
       ? Number(timeoutMs)
@@ -25,61 +35,100 @@ function abortSignal(timeoutMs) {
 
 export class AgentRuntime {
   constructor(options = {}) {
-    this.env = getEnvironment(
-      options.env ?? {}
-    );
+    this.env =
+      getEnvironment(
+        options.env ?? {}
+      );
 
-    this.db = options.db ?? null;
-    this.logger = options.logger ?? console;
+    this.db =
+      options.db ?? null;
+
+    this.logger =
+      options.logger ?? console;
 
     this.memoryManager =
       options.memoryManager ??
       new MemoryManager({
         db: this.db,
-        logger: this.logger
+        logger: this.logger,
       });
+
+    this.approvalController =
+      options.approvalController ??
+      createApprovalController(
+        this.env
+      );
 
     this.toolExecutor =
       options.toolExecutor ??
       new ToolExecutor({
         registry:
           options.toolRegistry ??
-          TOOL_REGISTRY,
-        logger: this.logger
+          createToolRegistry(
+            this.env
+          ),
+
+        logger:
+          this.logger,
+
+        approvalController:
+          this.approvalController,
       });
   }
 
-  createAgent(agentId) {
-    return new Agent(agentId, {
-      environment: this.env,
-      memoryManager: this.memoryManager,
-      logger: this.logger
-    });
+  createAgent(
+    agentId
+  ) {
+    return new Agent(
+      agentId,
+      {
+        environment:
+          this.env,
+
+        memoryManager:
+          this.memoryManager,
+
+        logger:
+          this.logger,
+      }
+    );
   }
 
   async run({
     agentId,
     task,
-    context = {}
+    context = {},
   }) {
-    const agent = this.createAgent(agentId);
+    const agent =
+      this.createAgent(
+        agentId
+      );
 
-    if (!task?.trim()) {
-      throw new Error("Task is required.");
+    if (
+      !task?.trim()
+    ) {
+      throw new Error(
+        "Task is required."
+      );
     }
 
     const budget =
-      getAgentBudget(agentId);
+      getAgentBudget(
+        agentId
+      );
 
     const privateMemory =
       await this.memoryManager.getRelevant({
         agentId,
-        scope: agent.getMemoryScope(),
-        limit: 6
+        scope:
+          agent.getMemoryScope(),
+        limit: 6,
       });
 
     const companyMemory =
-      await this.memoryManager.getCompanyMemory(5);
+      await this.memoryManager.getCompanyMemory(
+        5
+      );
 
     const systemPrompt =
       this.buildSystemPrompt(
@@ -91,29 +140,33 @@ export class AgentRuntime {
     const initialUserPrompt =
       this.buildTaskPrompt({
         task,
-        context
+        context,
       });
 
     const tools =
       this.toolExecutor
-        .getDefinitionsForAgent(agent);
+        .getDefinitionsForAgent(
+          agent
+        );
 
     const messages = [
       {
         role: "system",
-        content: systemPrompt
+        content: systemPrompt,
       },
       {
         role: "user",
-        content: initialUserPrompt
-      }
+        content:
+          initialUserPrompt,
+      },
     ];
 
     let llmCalls = 0;
     let toolCalls = 0;
 
     while (
-      llmCalls < budget.maxLLMCallsPerTask
+      llmCalls <
+      budget.maxLLMCallsPerTask
     ) {
       llmCalls += 1;
 
@@ -122,13 +175,15 @@ export class AgentRuntime {
           messages,
           tools,
           model:
-            this.env.OPENROUTER_MODEL,
+            this.env
+              .OPENROUTER_MODEL,
           maxTokens:
-            budget.maxOutputTokens
+            budget.maxOutputTokens,
         });
 
       const message =
-        response?.choices?.[0]?.message;
+        response?.choices?.[0]
+          ?.message;
 
       if (!message) {
         throw new Error(
@@ -136,34 +191,47 @@ export class AgentRuntime {
         );
       }
 
-      messages.push(message);
+      messages.push(
+        message
+      );
 
       const requestedToolCalls =
-        Array.isArray(message.tool_calls)
+        Array.isArray(
+          message.tool_calls
+        )
           ? message.tool_calls
           : [];
 
       if (
-        requestedToolCalls.length === 0
+        requestedToolCalls.length ===
+        0
       ) {
         return {
           agent: agent.id,
-          agentName: agent.name,
+          agentName:
+            agent.name,
+
           content:
-            message.content ?? "",
+            message.content ??
+            "",
+
           model:
             response.model ||
-            this.env.OPENROUTER_MODEL,
+            this.env
+              .OPENROUTER_MODEL,
+
           usage:
-            response.usage ?? null,
+            response.usage ??
+            null,
+
           llmCalls,
-          toolCalls
+          toolCalls,
         };
       }
 
       for (
-        const toolCall
-        of requestedToolCalls
+        const toolCall of
+        requestedToolCalls
       ) {
         if (
           toolCalls >=
@@ -171,14 +239,16 @@ export class AgentRuntime {
         ) {
           messages.push({
             role: "tool",
+
             tool_call_id:
               toolCall.id,
+
             content:
               JSON.stringify({
                 ok: false,
                 error:
-                  "Tool-call budget exhausted."
-              })
+                  "Tool-call budget exhausted.",
+              }),
           });
 
           break;
@@ -187,44 +257,64 @@ export class AgentRuntime {
         toolCalls += 1;
 
         const functionName =
-          toolCall?.function?.name;
+          toolCall?.function
+            ?.name;
 
         const functionArguments =
-          toolCall?.function?.arguments ??
+          toolCall?.function
+            ?.arguments ??
           "{}";
 
         const result =
           await this.toolExecutor.execute({
-            agent,
+            agent: {
+              ...agent,
+
+              taskId:
+                context?.taskId ??
+                null,
+            },
+
             toolName:
               functionName,
+
             arguments:
-              functionArguments
+              functionArguments,
           });
 
         messages.push({
           role: "tool",
+
           tool_call_id:
             toolCall.id,
+
           content:
             JSON.stringify(
               result
-            ).slice(0, 15000)
+            ).slice(0, 15000),
         });
       }
     }
 
     return {
       agent: agent.id,
-      agentName: agent.name,
+
+      agentName:
+        agent.name,
+
       content:
         "I reached the task reasoning limit before completing the task.",
+
       model:
-        this.env.OPENROUTER_MODEL,
+        this.env
+          .OPENROUTER_MODEL,
+
       usage: null,
+
       llmCalls,
       toolCalls,
-      incomplete: true
+
+      incomplete: true,
     };
   }
 
@@ -235,46 +325,73 @@ export class AgentRuntime {
   ) {
     return [
       agent.buildSystemIdentity(),
+
       "",
+
       "PRIVATE MEMORY:",
-      this.memoryManager.formatForPrompt(
-        privateMemory
-      ),
+
+      this.memoryManager
+        .formatForPrompt(
+          privateMemory
+        ),
+
       "",
+
       "COMPANY MEMORY:",
-      this.memoryManager.formatForPrompt(
-        companyMemory
-      ),
+
+      this.memoryManager
+        .formatForPrompt(
+          companyMemory
+        ),
+
       "",
+
       "TOOL POLICY:",
+
       "- Use tools only when necessary.",
+
       "- Never invent tool results.",
+
       "- Never claim an action succeeded without verification.",
+
       "- Stay within your permissions.",
+
       "- Stop when the task is complete.",
-      "- Do not repeatedly call a tool for the same information."
+
+      "- Do not repeatedly call a tool for the same information.",
     ].join("\n");
   }
 
   buildTaskPrompt({
     task,
-    context
+    context,
   }) {
     return [
       "TASK:",
+
       task.trim(),
+
       "",
+
       "CONTEXT:",
-      this.compactContext(context),
+
+      this.compactContext(
+        context
+      ),
+
       "",
-      "Return a useful final answer when the task is complete."
+
+      "Return a useful final answer when the task is complete.",
     ].join("\n");
   }
 
-  compactContext(context) {
+  compactContext(
+    context
+  ) {
     if (
       !context ||
-      typeof context !== "object"
+      typeof context !==
+        "object"
     ) {
       return "None.";
     }
@@ -282,22 +399,32 @@ export class AgentRuntime {
     const parts = [];
 
     for (
-      const [key, value]
-      of Object.entries(context).slice(0, 15)
+      const [
+        key,
+        value,
+      ] of Object.entries(
+        context
+      ).slice(0, 15)
     ) {
       let text;
 
       try {
         text =
-          typeof value === "string"
+          typeof value ===
+          "string"
             ? value
-            : JSON.stringify(value);
+            : JSON.stringify(
+                value
+              );
       } catch {
-        text = String(value);
+        text =
+          String(value);
       }
 
       parts.push(
-        `${key}: ${String(text).slice(0, 1500)}`
+        `${key}: ${String(
+          text
+        ).slice(0, 1500)}`
       );
     }
 
@@ -310,10 +437,11 @@ export class AgentRuntime {
     messages,
     tools,
     model,
-    maxTokens
+    maxTokens,
   }) {
     const apiKey =
-      this.env.OPENROUTER_API_KEY;
+      this.env
+        .OPENROUTER_API_KEY;
 
     if (!apiKey) {
       throw new Error(
@@ -324,45 +452,66 @@ export class AgentRuntime {
     const body = {
       model:
         model ||
-        this.env.OPENROUTER_MODEL,
+        this.env
+          .OPENROUTER_MODEL,
+
       messages,
+
       temperature: 0.2,
-      max_tokens: maxTokens
+
+      max_tokens:
+        maxTokens,
     };
 
-    if (tools.length > 0) {
-      body.tools = tools;
-      body.tool_choice = "auto";
+    if (
+      tools.length > 0
+    ) {
+      body.tools =
+        tools;
+
+      body.tool_choice =
+        "auto";
     }
 
-    const response = await fetch(
-      `${this.env.OPENROUTER_BASE_URL}/chat/completions`,
-      {
-        method: "POST",
+    const response =
+      await fetch(
+        `${this.env.OPENROUTER_BASE_URL}/chat/completions`,
+        {
+          method: "POST",
 
-        headers: {
-          "Authorization":
-            `Bearer ${apiKey}`,
-          "Content-Type":
-            "application/json",
-          "HTTP-Referer":
-            this.env.APP_URL ||
-            "https://dpdpready.online",
-          "X-Title":
-            this.env.APP_NAME ||
-            "DPDPReady AI"
-        },
+          headers: {
+            Authorization:
+              `Bearer ${apiKey}`,
 
-        body: JSON.stringify(body),
+            "Content-Type":
+              "application/json",
 
-        signal: abortSignal(
-          this.env.LLM_TIMEOUT_MS ||
-          DEFAULT_TIMEOUT_MS
-        )
-      }
-    );
+            "HTTP-Referer":
+              this.env.APP_URL ||
+              "https://dpdpready.online",
 
-    if (!response.ok) {
+            "X-Title":
+              this.env.APP_NAME ||
+              "DPDPReady AI",
+          },
+
+          body:
+            JSON.stringify(
+              body
+            ),
+
+          signal:
+            abortSignal(
+              this.env
+                .LLM_TIMEOUT_MS ||
+              DEFAULT_TIMEOUT_MS
+            ),
+        }
+      );
+
+    if (
+      !response.ok
+    ) {
       const error =
         await response.text();
 
