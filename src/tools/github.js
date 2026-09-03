@@ -1,361 +1,220 @@
+// ============================================================
+// DPDPREADY AI — GITHUB CLIENT
+// ============================================================
+
 import { fetchJson } from "../utils/http.js";
+import {
+  assertString,
+  assertOptionalString,
+} from "../utils/validation.js";
 
 const GITHUB_API = "https://api.github.com";
-const GITHUB_API_VERSION = "2022-11-28";
-
-function required(value, name) {
-  if (
-    value === undefined ||
-    value === null ||
-    value === ""
-  ) {
-    throw new Error(`${name} is required`);
-  }
-
-  return value;
-}
-
-function encodePath(value) {
-  return encodeURIComponent(value)
-    .replaceAll("%2F", "/");
-}
+const GITHUB_VERSION = "2022-11-28";
 
 export function createGitHubClient(env) {
   const token = env.GITHUB_TOKEN;
 
-  const defaultOwner =
-    env.GITHUB_OWNER;
-
-  const defaultRepo =
-    env.GITHUB_REPO;
-
   if (!token) {
-    throw new Error(
-      "GITHUB_TOKEN is not configured"
-    );
+    throw new Error("GITHUB_TOKEN is not configured");
   }
 
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    Accept:
-      "application/vnd.github+json",
-    "X-GitHub-Api-Version":
-      GITHUB_API_VERSION,
-    "User-Agent":
-      "DPDPReady-AI",
-  };
+  const defaultOwner = env.GITHUB_OWNER;
+  const defaultRepo = env.GITHUB_REPO;
 
-  async function request(
-    path,
-    options = {}
-  ) {
+  function target(params = {}) {
+    return {
+      owner: params.owner || defaultOwner,
+      repo: params.repo || defaultRepo,
+    };
+  }
+
+  async function request(path, options = {}) {
     return fetchJson(
       `${GITHUB_API}${path}`,
       {
         ...options,
         headers: {
-          ...headers,
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${token}`,
+          "x-github-api-version": GITHUB_VERSION,
           ...(options.headers || {}),
         },
       }
     );
   }
 
-  function repository(args = {}) {
-    return {
-      owner:
-        args.owner ||
-        defaultOwner,
+  async function getRepository(params = {}) {
+    const { owner, repo } = target(params);
 
-      repo:
-        args.repo ||
-        defaultRepo,
-    };
+    return request(`/repos/${owner}/${repo}`);
   }
 
-  async function getRepository(
-    args = {}
-  ) {
-    const { owner, repo } =
-      repository(args);
+  async function getBranch(params = {}) {
+    const { owner, repo } = target(params);
 
-    required(owner, "owner");
-    required(repo, "repo");
+    assertString(params.branch, "branch", 200);
 
     return request(
-      `/repos/${encodeURIComponent(
-        owner
-      )}/${encodeURIComponent(repo)}`
-    );
-  }
-
-  async function getBranch(
-    args = {}
-  ) {
-    const { owner, repo } =
-      repository(args);
-
-    required(owner, "owner");
-    required(repo, "repo");
-    required(args.branch, "branch");
-
-    return request(
-      `/repos/${encodeURIComponent(
-        owner
-      )}/${encodeURIComponent(
-        repo
-      )}/branches/${encodeURIComponent(
-        args.branch
+      `/repos/${owner}/${repo}/branches/${encodeURIComponent(
+        params.branch
       )}`
     );
   }
 
-  async function listBranches(
-    args = {}
-  ) {
-    const { owner, repo } =
-      repository(args);
-
-    required(owner, "owner");
-    required(repo, "repo");
-
-    const page =
-      Math.max(
-        Number(args.page) || 1,
-        1
-      );
-
-    const perPage =
-      Math.min(
-        Math.max(
-          Number(args.perPage) || 30,
-          1
-        ),
-        100
-      );
+  async function listBranches(params = {}) {
+    const { owner, repo } = target(params);
 
     return request(
-      `/repos/${owner}/${repo}/branches?page=${page}&per_page=${perPage}`
+      `/repos/${owner}/${repo}/branches?per_page=100`
     );
   }
 
-  async function getFile(
-    args = {}
-  ) {
-    const { owner, repo } =
-      repository(args);
+  async function getFile(params = {}) {
+    const { owner, repo } = target(params);
 
-    required(owner, "owner");
-    required(repo, "repo");
-    required(args.path, "path");
+    assertString(params.path, "path", 1000);
 
-    const ref = args.ref
-      ? `?ref=${encodeURIComponent(
-          args.ref
-        )}`
+    const ref = params.ref
+      ? `?ref=${encodeURIComponent(params.ref)}`
       : "";
 
     return request(
-      `/repos/${owner}/${repo}/contents/${encodePath(
-        args.path
-      )}${ref}`
+      `/repos/${owner}/${repo}/contents/${params.path}${ref}`
     );
   }
 
-  async function createBranch(
-    args = {}
-  ) {
-    const { owner, repo } =
-      repository(args);
+  async function getTree(params = {}) {
+    const { owner, repo } = target(params);
 
-    required(owner, "owner");
-    required(repo, "repo");
-    required(args.branch, "branch");
-
-    const base =
-      args.fromBranch ||
-      args.baseBranch ||
+    const branch =
+      params.ref ||
+      env.GITHUB_DEFAULT_BRANCH ||
       "main";
 
-    const baseRef =
-      await request(
-        `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(
-          base
-        )}`
-      );
+    const branchInfo = await getBranch({
+      owner,
+      repo,
+      branch,
+    });
 
-    const sha =
-      baseRef?.object?.sha;
+    const sha = branchInfo?.commit?.sha;
 
     if (!sha) {
-      throw new Error(
-        `Could not resolve SHA for branch ${base}`
-      );
+      throw new Error("Unable to determine branch commit SHA");
     }
+
+    return request(
+      `/repos/${owner}/${repo}/git/trees/${sha}?recursive=1`
+    );
+  }
+
+  async function createBranch(params = {}) {
+    const { owner, repo } = target(params);
+
+    assertString(params.base, "base", 200);
+    assertString(params.branch, "branch", 200);
+
+    const base = await getBranch({
+      owner,
+      repo,
+      branch: params.base,
+    });
 
     return request(
       `/repos/${owner}/${repo}/git/refs`,
       {
         method: "POST",
-
-        headers: {
-          "content-type":
-            "application/json",
-        },
-
         body: JSON.stringify({
-          ref: `refs/heads/${args.branch}`,
-          sha,
+          ref: `refs/heads/${params.branch}`,
+          sha: base.commit.sha,
         }),
       }
     );
   }
 
-  async function updateFile(
-    args = {}
-  ) {
-    const { owner, repo } =
-      repository(args);
+  async function updateFile(params = {}) {
+    const { owner, repo } = target(params);
 
-    required(owner, "owner");
-    required(repo, "repo");
-    required(args.path, "path");
-    required(args.content, "content");
-    required(args.branch, "branch");
-    required(args.message, "message");
+    assertString(params.path, "path", 1000);
+    assertString(params.content, "content", 500_000);
+    assertString(params.message, "message", 500);
+    assertString(params.branch, "branch", 200);
 
-    let sha;
+    let existingSha = undefined;
 
     try {
-      const existing =
-        await getFile({
-          owner,
-          repo,
-          path: args.path,
-          ref: args.branch,
-        });
+      const existing = await getFile({
+        owner,
+        repo,
+        path: params.path,
+        ref: params.branch,
+      });
 
-      sha = existing?.sha;
+      existingSha = existing?.sha;
     } catch (error) {
       if (error.status !== 404) {
         throw error;
       }
     }
 
+    const body = {
+      message: params.message,
+      content: btoa(unescape(encodeURIComponent(params.content))),
+      branch: params.branch,
+    };
+
+    if (existingSha) {
+      body.sha = existingSha;
+    }
+
     return request(
-      `/repos/${owner}/${repo}/contents/${encodePath(
-        args.path
-      )}`,
+      `/repos/${owner}/${repo}/contents/${params.path}`,
       {
         method: "PUT",
-
-        headers: {
-          "content-type":
-            "application/json",
-        },
-
-        body: JSON.stringify({
-          message: args.message,
-
-          content:
-            Buffer.from(
-              args.content,
-              "utf8"
-            ).toString("base64"),
-
-          branch: args.branch,
-
-          ...(sha
-            ? { sha }
-            : {}),
-        }),
+        body: JSON.stringify(body),
       }
     );
   }
 
-  async function createPullRequest(
-    args = {}
-  ) {
-    const { owner, repo } =
-      repository(args);
+  async function createPullRequest(params = {}) {
+    const { owner, repo } = target(params);
 
-    required(owner, "owner");
-    required(repo, "repo");
-
-    required(
-      args.title,
-      "title"
-    );
-
-    required(
-      args.head,
-      "head"
-    );
-
-    required(
-      args.base,
-      "base"
-    );
-
-    const body =
-      args.body || "";
+    assertString(params.title, "title", 500);
+    assertString(params.head, "head", 200);
+    assertString(params.base, "base", 200);
 
     return request(
       `/repos/${owner}/${repo}/pulls`,
       {
         method: "POST",
-
-        headers: {
-          "content-type":
-            "application/json",
-        },
-
         body: JSON.stringify({
-          title: args.title,
-          head: args.head,
-          base: args.base,
-          body,
-          draft:
-            Boolean(args.draft),
+          title: params.title,
+          head: params.head,
+          base: params.base,
+          body: params.body || "",
+          draft: Boolean(params.draft),
         }),
       }
     );
   }
 
-  async function getPullRequest(
-    args = {}
-  ) {
-    const { owner, repo } =
-      repository(args);
-
-    required(owner, "owner");
-    required(repo, "repo");
-    required(
-      args.number,
-      "number"
-    );
+  async function getPullRequest(params = {}) {
+    const { owner, repo } = target(params);
 
     return request(
-      `/repos/${owner}/${repo}/pulls/${args.number}`
+      `/repos/${owner}/${repo}/pulls/${params.number}`
     );
   }
 
-  async function listPullRequests(
-    args = {}
-  ) {
-    const { owner, repo } =
-      repository(args);
+  async function listPullRequests(params = {}) {
+    const { owner, repo } = target(params);
 
-    required(owner, "owner");
-    required(repo, "repo");
-
-    const state =
-      args.state || "open";
+    const state = params.state || "open";
 
     return request(
       `/repos/${owner}/${repo}/pulls?state=${encodeURIComponent(
         state
-      )}&per_page=50`
+      )}&per_page=100`
     );
   }
 
@@ -364,6 +223,7 @@ export function createGitHubClient(env) {
     getBranch,
     listBranches,
     getFile,
+    getTree,
     createBranch,
     updateFile,
     createPullRequest,
