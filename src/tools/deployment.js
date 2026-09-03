@@ -1,36 +1,27 @@
+// ============================================================
+// DPDPREADY AI — DEPLOYMENT CLIENT
+// Render + Cloudflare
+// ============================================================
+
 import { fetchJson } from "../utils/http.js";
+import { assertString } from "../utils/validation.js";
 
-export function createRenderClient(
-  env
-) {
-  const token =
-    env.RENDER_API_KEY;
+export function createRenderClient(env) {
+  const apiKey = env.RENDER_API_KEY;
+  const defaultServiceId = env.RENDER_SERVICE_ID;
 
-  const defaultServiceId =
-    env.RENDER_SERVICE_ID;
+  if (!apiKey) {
+    throw new Error("RENDER_API_KEY is not configured");
+  }
 
-  async function request(
-    path,
-    options = {}
-  ) {
-    if (!token) {
-      throw new Error(
-        "RENDER_API_KEY is not configured"
-      );
-    }
-
+  async function request(path, options = {}) {
     return fetchJson(
       `https://api.render.com${path}`,
       {
         ...options,
-
         headers: {
-          Authorization:
-            `Bearer ${token}`,
-
-          Accept:
-            "application/json",
-
+          accept: "application/json",
+          authorization: `Bearer ${apiKey}`,
           ...(options.headers || {}),
         },
       }
@@ -39,159 +30,75 @@ export function createRenderClient(
 
   async function getDeployment({
     deploymentId,
-    serviceId =
-      defaultServiceId,
-  } = {}) {
-    if (deploymentId) {
-      return request(
-        `/v1/deploys/${encodeURIComponent(
-          deploymentId
-        )}`
-      );
-    }
+  }) {
+    assertString(deploymentId, "deploymentId");
 
-    if (!serviceId) {
-      throw new Error(
-        "serviceId is required"
-      );
-    }
-
-    const result =
-      await request(
-        `/v1/services/${encodeURIComponent(
-          serviceId
-        )}/deploys?limit=1`
-      );
-
-    return Array.isArray(result)
-      ? result[0]
-      : result;
+    return request(
+      `/v1/deploys/${deploymentId}`
+    );
   }
 
   async function listDeployments({
-    serviceId =
-      defaultServiceId,
+    serviceId = defaultServiceId,
     limit = 20,
   } = {}) {
-    if (!serviceId) {
-      throw new Error(
-        "serviceId is required"
-      );
-    }
-
-    const safeLimit =
-      Math.min(
-        Math.max(
-          Number(limit) || 20,
-          1
-        ),
-        100
-      );
+    assertString(serviceId, "serviceId");
 
     return request(
-      `/v1/services/${encodeURIComponent(
-        serviceId
-      )}/deploys?limit=${safeLimit}`
+      `/v1/services/${serviceId}/deploys?limit=${Math.min(
+        Number(limit) || 20,
+        100
+      )}`
     );
   }
 
   async function triggerDeploy({
-    serviceId =
-      defaultServiceId,
-    clearCache =
-      "do_not_clear",
-    commitId,
+    serviceId = defaultServiceId,
+    clearCache = false,
   } = {}) {
-    if (!serviceId) {
-      throw new Error(
-        "serviceId is required"
-      );
-    }
+    assertString(serviceId, "serviceId");
 
     return request(
-      `/v1/services/${encodeURIComponent(
-        serviceId
-      )}/deploys`,
+      `/v1/services/${serviceId}/deploys`,
       {
         method: "POST",
-
-        headers: {
-          "content-type":
-            "application/json",
-        },
-
         body: JSON.stringify({
-          clearCache,
+          clearCache: Boolean(clearCache),
+        }),
+      }
+    );
+  }
 
-          ...(commitId
-            ? { commitId }
-            : {}),
+  async function rollback({
+    serviceId = defaultServiceId,
+    commitId,
+  }) {
+    assertString(serviceId, "serviceId");
+    assertString(commitId, "commitId");
+
+    return request(
+      `/v1/services/${serviceId}/deploys`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          commitId,
         }),
       }
     );
   }
 
   async function listLogs({
-    ownerId =
-      env.RENDER_OWNER_ID,
+    ownerId,
     resource,
     startTime,
     endTime,
-    limit = 100,
   } = {}) {
-    if (!ownerId) {
-      throw new Error(
-        "RENDER_OWNER_ID is required"
-      );
-    }
+    const params = new URLSearchParams();
 
-    if (!resource) {
-      throw new Error(
-        "resource is required"
-      );
-    }
-
-    const params =
-      new URLSearchParams();
-
-    params.set(
-      "ownerId",
-      ownerId
-    );
-
-    params.set(
-      "resource",
-      Array.isArray(resource)
-        ? resource.join(",")
-        : resource
-    );
-
-    if (startTime) {
-      params.set(
-        "startTime",
-        startTime
-      );
-    }
-
-    if (endTime) {
-      params.set(
-        "endTime",
-        endTime
-      );
-    }
-
-    params.set(
-      "limit",
-      String(
-        Math.min(
-          Math.max(
-            Number(limit) || 100,
-            1
-          ),
-          500
-        )
-      )
-    );
+    if (ownerId) params.set("ownerId", ownerId);
+    if (resource) params.set("resource", resource);
+    if (startTime) params.set("startTime", startTime);
+    if (endTime) params.set("endTime", endTime);
 
     return request(
       `/v1/logs?${params.toString()}`
@@ -202,109 +109,59 @@ export function createRenderClient(
     getDeployment,
     listDeployments,
     triggerDeploy,
+    rollback,
     listLogs,
   };
 }
 
-export function createCloudflareClient(
-  env
-) {
-  const accountId =
-    env.CLOUDFLARE_ACCOUNT_ID;
+export function createCloudflareClient(env) {
+  const token = env.CLOUDFLARE_API_TOKEN;
+  const accountId = env.CLOUDFLARE_ACCOUNT_ID;
 
-  const token =
-    env.CLOUDFLARE_API_TOKEN;
+  if (!token || !accountId) {
+    throw new Error(
+      "CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are required"
+    );
+  }
 
-  async function request(
-    path,
-    options = {}
-  ) {
-    if (!accountId) {
-      throw new Error(
-        "CLOUDFLARE_ACCOUNT_ID is not configured"
-      );
-    }
-
-    if (!token) {
-      throw new Error(
-        "CLOUDFLARE_API_TOKEN is not configured"
-      );
-    }
-
-    const response =
-      await fetchJson(
-        `https://api.cloudflare.com/client/v4${path}`,
-        {
-          ...options,
-
-          headers: {
-            Authorization:
-              `Bearer ${token}`,
-
-            Accept:
-              "application/json",
-
-            ...(options.headers || {}),
-          },
-        }
-      );
-
-    return response;
+  async function request(path, options = {}) {
+    return fetchJson(
+      `https://api.cloudflare.com/client/v4${path}`,
+      {
+        ...options,
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${token}`,
+          ...(options.headers || {}),
+        },
+      }
+    );
   }
 
   async function workerVersions({
-    scriptName =
-      env.CLOUDFLARE_SCRIPT_NAME,
-
+    scriptName,
     page = 1,
-
     perPage = 20,
-  } = {}) {
-    if (!scriptName) {
-      throw new Error(
-        "CLOUDFLARE_SCRIPT_NAME is required"
-      );
-    }
+  }) {
+    assertString(scriptName, "scriptName");
 
     return request(
-      `/accounts/${accountId}/workers/scripts/${encodeURIComponent(
-        scriptName
-      )}/versions?page=${page}&per_page=${perPage}`
+      `/accounts/${accountId}/workers/scripts/${scriptName}/versions?page=${page}&per_page=${perPage}`
     );
   }
 
   async function d1Query({
-    databaseId =
-      env.CLOUDFLARE_D1_DATABASE_ID,
-
+    databaseId,
     sql,
-
     params = [],
-  } = {}) {
-    if (!databaseId) {
-      throw new Error(
-        "CLOUDFLARE_D1_DATABASE_ID is required"
-      );
-    }
-
-    if (!sql) {
-      throw new Error(
-        "sql is required"
-      );
-    }
+  }) {
+    assertString(databaseId, "databaseId");
+    assertString(sql, "sql", 20_000);
 
     return request(
-      `/accounts/${accountId}/d1/database/${encodeURIComponent(
-        databaseId
-      )}/query`,
+      `/accounts/${accountId}/d1/database/${databaseId}/query`,
       {
         method: "POST",
-
-        headers: {
-          "content-type":
-            "application/json",
-        },
-
         body: JSON.stringify({
           sql,
           params,
