@@ -17,18 +17,39 @@ import {
   truncateTelegramText
 } from "./formatting.js";
 
-function extractText(update) {
+function extractMessage(update) {
   return (
-    update?.message?.text ??
-    update?.edited_message?.text ??
-    ""
+    update?.message ??
+    update?.edited_message ??
+    null
   );
 }
 
+function extractText(update) {
+  const message =
+    extractMessage(update);
+
+  return String(
+    message?.text ?? ""
+  ).trim();
+}
+
 function getChatId(update) {
+  const message =
+    extractMessage(update);
+
   return (
-    update?.message?.chat?.id ??
-    update?.edited_message?.chat?.id ??
+    message?.chat?.id ??
+    null
+  );
+}
+
+function getMessageId(update) {
+  const message =
+    extractMessage(update);
+
+  return (
+    message?.message_id ??
     null
   );
 }
@@ -38,6 +59,12 @@ async function telegramRequest(
   method,
   body
 ) {
+  if (!token) {
+    throw new Error(
+      "Telegram bot token is missing."
+    );
+  }
+
   const response =
     await fetch(
       `https://api.telegram.org/bot${token}/${method}`,
@@ -51,45 +78,94 @@ async function telegramRequest(
       }
     );
 
+  const responseText =
+    await response.text();
+
+  let payload = null;
+
+  try {
+    payload =
+      JSON.parse(
+        responseText
+      );
+  } catch {
+    payload = {
+      ok: response.ok,
+      raw: responseText
+    };
+  }
+
   if (!response.ok) {
     throw new Error(
       `Telegram ${method} failed: ${response.status}`
     );
   }
 
-  return response.json();
+  if (
+    payload &&
+    payload.ok === false
+  ) {
+    throw new Error(
+      `Telegram ${method} failed.`
+    );
+  }
+
+  return payload;
 }
 
-async function sendMessage(
+async function sendMessage({
   token,
   chatId,
   text,
-  replyTo = null
-) {
+  replyToMessageId = null
+}) {
   return telegramRequest(
     token,
     "sendMessage",
     {
       chat_id: chatId,
-      text: truncateTelegramText(text),
+      text: truncateTelegramText(
+        text
+      ),
       reply_to_message_id:
-        replyTo ?? undefined
+        replyToMessageId ??
+        undefined,
+      allow_sending_without_reply:
+        true
     }
   );
 }
 
+/**
+ * Match a bot by its display name.
+ *
+ * Example:
+ *   "Marcus check production"
+ *
+ * This intentionally preserves the repo's
+ * current name-based direct-agent behaviour.
+ */
 function findMentionedAgent(
   text,
   botConfigs
 ) {
   const lower =
-    String(text).toLowerCase();
+    String(text ?? "")
+      .toLowerCase();
 
-  for (const bot of botConfigs) {
-    if (
-      lower.includes(
-        bot.name.toLowerCase()
+  for (
+    const bot of botConfigs
+  ) {
+    const name =
+      String(
+        bot.name ?? ""
       )
+        .toLowerCase()
+        .trim();
+
+    if (
+      name &&
+      lower.includes(name)
     ) {
       return bot;
     }
@@ -98,27 +174,76 @@ function findMentionedAgent(
   return null;
 }
 
+function removeBotName(
+  text,
+  botName
+) {
+  if (!botName) {
+    return String(text ?? "")
+      .trim();
+  }
+
+  return String(text ?? "")
+    .replace(
+      new RegExp(
+        botName.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&"
+        ),
+        "ig"
+      ),
+      ""
+    )
+    .replace(
+      /^\s*[:,\-]+\s*/,
+      ""
+    )
+    .trim();
+}
+
+function isCommandForKnownAgent(
+  command,
+  botConfigs
+) {
+  if (!command) {
+    return null;
+  }
+
+  return (
+    botConfigs.find(
+      (bot) =>
+        bot.agentId ===
+        command.command
+    ) ?? null
+  );
+}
+
 export async function routeTelegramUpdate(
   update,
   env,
   orchestrator,
-  runtime
+  runtime,
+  teamCoordinator = null
 ) {
   const chatId =
     getChatId(update);
 
   if (
     !chatId ||
-    !isAllowedGroup(chatId, env)
+    !isAllowedGroup(
+      chatId,
+      env
+    )
   ) {
     return {
       handled: false,
-      reason: "group_not_allowed"
+      reason:
+        "group_not_allowed"
     };
   }
 
   const text =
-    extractText(update).trim();
+    extractText(update);
 
   if (!text) {
     return {
@@ -127,35 +252,61 @@ export async function routeTelegramUpdate(
     };
   }
 
+  const messageId =
+    getMessageId(update);
+
   const bots =
     getBotConfigs(env);
 
   const command =
     parseCommand(text);
 
-  const mentioned =
+  /*
+   * Direct agent mode:
+   *
+   * /ops check production
+   * /research check latest DPDP update
+   * Marcus check production
+   */
+  let targetBot =
     findMentionedAgent(
       text,
       bots
     );
 
-  let targetBot =
-    mentioned;
-
-  if (!targetBot && command) {
+  if (!targetBot) {
     targetBot =
-      bots.find(
-        (bot) =>
-          bot.agentId ===
-          command.command
+      isCommandForKnownAgent(
+        command,
+        bots
       );
   }
 
+  /*
+   * NEW:
+   *
+   * If the founder doesn't explicitly target
+   * one bot, the message becomes a team
+   * conversation.
+   */
   if (!targetBot) {
-    return {
-      handled: false,
-      reason: "no_agent_target"
-    };
+    if (!teamCoordinator) {
+      return {
+        handled: false,
+        reason:
+          "team_coordinator_unavailable"
+      };
+    }
+
+    return teamCoordinator.run({
+      chatId,
+      message: text,
+      replyToMessageId:
+        messageId,
+      triggerAgentId:
+        null,
+      incident: false
+    });
   }
 
   const agent =
@@ -166,54 +317,81 @@ export async function routeTelegramUpdate(
   if (!agent) {
     return {
       handled: false,
-      reason: "agent_not_found"
+      reason:
+        "agent_not_found"
     };
   }
 
-  const taskText =
-    command
-      ? command.args.join(" ")
-      : text.replace(
-          new RegExp(
-            targetBot.name,
-            "ig"
-          ),
-          ""
-        ).trim();
+  let taskText = text;
 
+  if (command) {
+    taskText =
+      command.args.join(
+        " "
+      ).trim();
+  } else {
+    taskText =
+      removeBotName(
+        text,
+        targetBot.name
+      );
+  }
+
+  /*
+   * Direct mention with no task.
+   */
   if (!taskText) {
-    await sendMessage(
-      targetBot.token,
+    await sendMessage({
+      token:
+        targetBot.token,
       chatId,
-      formatAgentMessage(
-        agent,
-        `I'm online. Give me a task.`
-      ),
-      update?.message?.message_id
-    );
+      text:
+        formatAgentMessage(
+          agent,
+          "I'm online. Give me a task."
+        ),
+      replyToMessageId:
+        messageId
+    });
 
     return {
-      handled: true
+      handled: true,
+      mode: "direct",
+      agent:
+        agent.id
     };
   }
 
   const task =
     orchestrator.createTask({
       title:
-        taskText.slice(0, 200),
+        taskText.slice(
+          0,
+          200
+        ),
+
       description:
         taskText,
+
       assignedTo:
         agent.id,
+
       createdBy:
         "founder",
+
       priority:
         "normal",
+
       metadata: {
-        source: "telegram",
+        source:
+          "telegram",
+
         chatId,
-        messageId:
-          update?.message?.message_id
+
+        messageId,
+
+        directAgent:
+          true
       }
     });
 
@@ -227,21 +405,28 @@ export async function routeTelegramUpdate(
 
   const response =
     result?.result?.content ??
+    result?.result ??
     "Task completed.";
 
-  await sendMessage(
-    targetBot.token,
+  await sendMessage({
+    token:
+      targetBot.token,
     chatId,
-    formatAgentMessage(
-      agent,
-      response
-    ),
-    update?.message?.message_id
-  );
+    text:
+      formatAgentMessage(
+        agent,
+        response
+      ),
+    replyToMessageId:
+      messageId
+  });
 
   return {
     handled: true,
-    agent: agent.id,
-    taskId: task.id
+    mode: "direct",
+    agent:
+      agent.id,
+    taskId:
+      task.id
   };
 }
