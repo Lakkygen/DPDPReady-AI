@@ -1,807 +1,950 @@
 // src/tools/registry.js
 
-function assertHttpsUrl(url) {
-  if (!/^https:\/\//i.test(url)) {
-    throw new Error(
-      "Only HTTPS URLs are allowed."
-    );
+import { createGitHubClient } from "./github.js";
+import {
+  createRenderClient,
+  createCloudflareClient
+} from "./deployment.js";
+
+import { createDatabase } from "./database.js";
+import { createWebClient } from "./web.js";
+import { createAnalyticsClient } from "./analytics.js";
+import { createTelegramClient } from "./communication.js";
+
+import { createBrowserClient } from "./browser.js";
+import { createQAClient } from "./qa.js";
+import { createCodeClient } from "./code.js";
+
+import { createEmailClient } from "./email.js";
+import {
+  createEmailVerificationClient
+} from "./emailVerification.js";
+
+import { createLeadsClient } from "./leads.js";
+import { createCampaignsClient } from "./campaigns.js";
+import { createCRMClient } from "./crm.js";
+
+import { createCustomersClient } from "./customers.js";
+import { createTicketsClient } from "./tickets.js";
+import { createSupportClient } from "./support.js";
+
+import { createResearchClient } from "./research.js";
+import {
+  createResearchMemory
+} from "../memory/research.js";
+import {
+  createCitationStore
+} from "../memory/citations.js";
+
+import { createMetricsClient } from "./metrics.js";
+import {
+  createAdvancedAnalyticsClient
+} from "./advancedAnalytics.js";
+
+import {
+  createForecastingClient
+} from "./forecasting.js";
+
+import {
+  createExperimentsClient
+} from "./experiments.js";
+
+function def(
+  name,
+  description,
+  parameters = {
+    type: "object",
+    properties: {},
+    additionalProperties: false
   }
+) {
+  return {
+    type: "function",
+    function: {
+      name,
+      description,
+      parameters
+    }
+  };
 }
 
-export const TOOL_REGISTRY = {
-  health_check: {
-    permission: "website.read",
+function tool(
+  name,
+  description,
+  execute,
+  extra = {},
+  parameters
+) {
+  return {
+    name,
+    definition: def(
+      name,
+      description,
+      parameters
+    ),
+    execute,
+    ...extra
+  };
+}
 
-    definition: {
-      type: "function",
-      function: {
-        name: "health_check",
-        description:
-          "Check whether a public HTTPS URL is responding.",
-        parameters: {
-          type: "object",
-          properties: {
-            url: {
-              type: "string"
+export function createToolRegistry(env = {}) {
+  const database =
+    createDatabase(env);
+
+  const github =
+    createGitHubClient(env);
+
+  const render =
+    createRenderClient(env);
+
+  const cloudflare =
+    createCloudflareClient(env);
+
+  const web =
+    createWebClient(env);
+
+  const analytics =
+    createAnalyticsClient(database);
+
+  const telegram =
+    createTelegramClient(env);
+
+  const browser =
+    createBrowserClient(env);
+
+  const qa =
+    createQAClient(env);
+
+  const code =
+    createCodeClient(github);
+
+  const email =
+    createEmailClient(env, {
+      database
+    });
+
+  const emailVerification =
+    createEmailVerificationClient(env);
+
+  const leads =
+    createLeadsClient(database, {
+      web,
+      emailVerification
+    });
+
+  const campaigns =
+    createCampaignsClient(database, {
+      email
+    });
+
+  const crm =
+    createCRMClient(database);
+
+  const customers =
+    createCustomersClient(database);
+
+  const tickets =
+    createTicketsClient(database);
+
+  const support =
+    createSupportClient({
+      database,
+      customers,
+      tickets,
+      email
+    });
+
+  const research =
+    createResearchClient(database);
+
+  const researchMemory =
+    createResearchMemory(database);
+
+  const citations =
+    createCitationStore(database);
+
+  const metrics =
+    createMetricsClient(database);
+
+  const advancedAnalytics =
+    createAdvancedAnalyticsClient(
+      database
+    );
+
+  const forecasting =
+    createForecastingClient(database);
+
+  const experiments =
+    createExperimentsClient(database);
+
+  return {
+    health_check: tool(
+      "health_check",
+      "Check the application health.",
+      async () => {
+        const response =
+          await fetch(
+            env.APP_URL,
+            {
+              redirect: "follow"
             }
-          },
-          required: ["url"],
-          additionalProperties: false
-        }
-      }
-    },
+          );
 
-    async execute({ args }) {
-      const url = String(args.url ?? "").trim();
-
-      assertHttpsUrl(url);
-
-      const started = Date.now();
-
-      const response = await fetch(url, {
-        method: "GET",
-        redirect: "follow"
-      });
-
-      return {
-        url,
-        status: response.status,
-        ok: response.ok,
-        latencyMs: Date.now() - started
-      };
-    }
-  },
-
-  get_logs: {
-    permission: "deployment.read",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "get_logs",
-        description:
-          "Retrieve recent logs for an application service.",
-        parameters: {
-          type: "object",
-          properties: {
-            service: {
-              type: "string"
-            },
-            limit: {
-              type: "integer",
-              minimum: 1,
-              maximum: 100
-            }
-          },
-          required: ["service"],
-          additionalProperties: false
-        }
-      }
-    },
-
-    async execute({ args, agent }) {
-      if (!agent.environment?.LOGS_API_URL) {
         return {
-          configured: false,
-          message:
-            "Logs provider is not configured."
+          ok: response.ok,
+          status: response.status,
+          url: env.APP_URL
         };
+      },
+      {
+        permission:
+          "website.read"
+      },
+      {
+        type: "object",
+        properties: {
+          url: {
+            type: "string"
+          }
+        },
+        required: [],
+        additionalProperties: false
       }
+    ),
 
-      const service =
-        encodeURIComponent(
-          String(args.service ?? "")
-        );
-
-      const limit = Math.min(
-        Number(args.limit) || 20,
-        100
-      );
-
-      const url =
-        `${agent.environment.LOGS_API_URL}` +
-        `?service=${service}&limit=${limit}`;
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(
-          `Logs provider returned ${response.status}.`
-        );
+    get_logs: tool(
+      "get_logs",
+      "Read recent Render deployment logs.",
+      async ({ args }) =>
+        render.listLogs(args),
+      {
+        permission:
+          "deployment.read"
       }
+    ),
 
-      return await response.json();
-    }
-  },
-
-  get_deployment: {
-    permission: "deployment.read",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "get_deployment",
-        description:
-          "Get deployment status for a service.",
-        parameters: {
-          type: "object",
-          properties: {
-            service: {
-              type: "string"
-            }
-          },
-          required: ["service"],
-          additionalProperties: false
-        }
+    get_deployment: tool(
+      "get_deployment",
+      "Get a Render deployment.",
+      async ({ args }) =>
+        render.getDeployment(args),
+      {
+        permission:
+          "deployment.read"
       }
-    },
+    ),
 
-    async execute({ args, agent }) {
-      if (!agent.environment?.DEPLOYMENT_API_URL) {
-        return {
-          configured: false,
-          message:
-            "Deployment provider is not configured."
-        };
+    github_repository: tool(
+      "github_repository",
+      "Get repository metadata.",
+      async () =>
+        github.getRepository(),
+      {
+        permission:
+          "github.read"
       }
+    ),
 
-      const service =
-        encodeURIComponent(
-          String(args.service ?? "")
-        );
-
-      const response = await fetch(
-        `${agent.environment.DEPLOYMENT_API_URL}` +
-        `?service=${service}`
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          `Deployment provider returned ${response.status}.`
-        );
+    github_get_branch: tool(
+      "github_get_branch",
+      "Get branch information.",
+      async ({ args }) =>
+        github.getBranch(args),
+      {
+        permission:
+          "github.read"
       }
+    ),
 
-      return await response.json();
-    }
-  },
-
-  create_branch: {
-    permission: "github.createBranch",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "create_branch",
-        description:
-          "Create a Git branch.",
-        parameters: {
-          type: "object",
-          properties: {
-            branchName: {
-              type: "string"
-            },
-            baseBranch: {
-              type: "string"
-            }
-          },
-          required: ["branchName"],
-          additionalProperties: false
-        }
+    github_list_branches: tool(
+      "github_list_branches",
+      "List repository branches.",
+      async ({ args }) =>
+        github.listBranches(args),
+      {
+        permission:
+          "github.read"
       }
-    },
+    ),
 
-    async execute({ args }) {
-      return {
-        configured: false,
-        action: "create_branch",
-        branchName: args.branchName,
-        baseBranch:
-          args.baseBranch || "main",
-        message:
-          "GitHub API integration is not configured yet."
-      };
-    }
-  },
-
-  create_pull_request: {
-    permission: "github.createPR",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "create_pull_request",
-        description:
-          "Create a GitHub pull request.",
-        parameters: {
-          type: "object",
-          properties: {
-            title: {
-              type: "string"
-            },
-            body: {
-              type: "string"
-            },
-            branch: {
-              type: "string"
-            }
-          },
-          required: [
-            "title",
-            "body",
-            "branch"
-          ],
-          additionalProperties: false
-        }
+    github_get_file: tool(
+      "github_get_file",
+      "Read a file from the repository.",
+      async ({ args }) =>
+        github.getFile(args),
+      {
+        permission:
+          "github.read"
       }
-    },
+    ),
 
-    async execute({ args }) {
-      return {
-        configured: false,
-        action: "create_pull_request",
-        title: args.title,
-        branch: args.branch,
-        message:
-          "GitHub API integration is not configured yet."
-      };
-    }
-  },
-
-  web_search: {
-    permission: "web.search",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "web_search",
-        description:
-          "Search the configured web-search provider.",
-        parameters: {
-          type: "object",
-          properties: {
-            query: {
-              type: "string"
-            }
-          },
-          required: ["query"],
-          additionalProperties: false
-        }
+    github_compare: tool(
+      "github_compare",
+      "Compare two Git refs.",
+      async ({ args }) =>
+        github.compare(args),
+      {
+        permission:
+          "github.read"
       }
-    },
+    ),
 
-    async execute({ args, agent }) {
-      const query =
-        String(args.query ?? "").trim();
-
-      if (!query) {
-        throw new Error(
-          "Search query is required."
-        );
+    create_branch: tool(
+      "create_branch",
+      "Create a Git branch.",
+      async ({ args }) =>
+        github.createBranch(args),
+      {
+        permission:
+          "github.createBranch",
+        requiresApproval: true
       }
+    ),
 
-      if (!agent.environment?.WEB_SEARCH_URL) {
-        return {
-          configured: false,
-          query,
-          message:
-            "Web search provider is not configured."
-        };
+    create_pull_request: tool(
+      "create_pull_request",
+      "Create a GitHub pull request.",
+      async ({ args }) =>
+        github.createPullRequest(args),
+      {
+        permission:
+          "github.createPR",
+        requiresApproval: true
       }
+    ),
 
-      const url =
-        `${agent.environment.WEB_SEARCH_URL}` +
-        `?q=${encodeURIComponent(query)}`;
-
-      const response =
-        await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(
-          `Search provider returned ${response.status}.`
-        );
+    github_create_branch: tool(
+      "github_create_branch",
+      "Create a Git branch.",
+      async ({ args }) =>
+        github.createBranch(args),
+      {
+        permission:
+          "github.createBranch",
+        requiresApproval: true
       }
+    ),
 
-      return await response.json();
-    }
-  },
-
-  web_fetch: {
-    permission: "web.fetch",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "web_fetch",
-        description:
-          "Fetch a public HTTPS webpage.",
-        parameters: {
-          type: "object",
-          properties: {
-            url: {
-              type: "string"
-            }
-          },
-          required: ["url"],
-          additionalProperties: false
-        }
+    github_update_file: tool(
+      "github_update_file",
+      "Create or update a repository file.",
+      async ({ args }) =>
+        github.updateFile(args),
+      {
+        permission:
+          "github.write",
+        requiresApproval: true
       }
-    },
+    ),
 
-    async execute({ args }) {
-      const url =
-        String(args.url ?? "").trim();
-
-      assertHttpsUrl(url);
-
-      const response =
-        await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(
-          `Page returned ${response.status}.`
-        );
+    github_create_pr: tool(
+      "github_create_pr",
+      "Open a pull request.",
+      async ({ args }) =>
+        github.createPullRequest(args),
+      {
+        permission:
+          "github.createPR",
+        requiresApproval: true
       }
+    ),
 
-      const content =
-        await response.text();
-
-      return {
-        url,
-        status: response.status,
-        content: content.slice(0, 20000)
-      };
-    }
-  },
-
-  save_lead: {
-    permission: "leads.write",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "save_lead",
-        description:
-          "Save a qualified business prospect.",
-        parameters: {
-          type: "object",
-          properties: {
-            company: {
-              type: "string"
-            },
-            website: {
-              type: "string"
-            },
-            reason: {
-              type: "string"
-            },
-            score: {
-              type: "number",
-              minimum: 0,
-              maximum: 100
-            }
-          },
-          required: [
-            "company",
-            "reason",
-            "score"
-          ],
-          additionalProperties: false
-        }
+    code_read_file: tool(
+      "code_read_file",
+      "Read a repository file through the code layer.",
+      async ({ args }) =>
+        code.readFile(args),
+      {
+        permission:
+          "code.read"
       }
-    },
+    ),
 
-    async execute({ args, agent }) {
-      if (!agent.environment?.DB) {
-        return {
-          configured: false,
-          message:
-            "Database is not configured."
-        };
+    code_replace_exact: tool(
+      "code_replace_exact",
+      "Safely replace one exact code block.",
+      async ({ args }) =>
+        code.replaceExact(args),
+      {
+        permission:
+          "code.write",
+        requiresApproval: true
       }
+    ),
 
-      const now =
-        new Date().toISOString();
+    code_apply_patch: tool(
+      "code_apply_patch",
+      "Apply a bounded exact replacement patch.",
+      async ({ args }) =>
+        code.applyUnifiedPatch(args),
+      {
+        permission:
+          "code.write",
+        requiresApproval: true
+      }
+    ),
 
-      await agent.environment.DB
-        .prepare(
+    code_basic_syntax_check: tool(
+      "code_basic_syntax_check",
+      "Perform a basic JavaScript delimiter/string syntax check.",
+      async ({ args }) =>
+        code.basicSyntaxCheck(
+          args.source
+        ),
+      {
+        permission:
+          "code.read"
+      }
+    ),
+
+    browser_check_page: tool(
+      "browser_check_page",
+      "Load a page in a remote browser and inspect it.",
+      async ({ args }) =>
+        browser.inspect(args),
+      {
+        permission:
+          "browser.use"
+      }
+    ),
+
+    browser_screenshot: tool(
+      "browser_screenshot",
+      "Capture a rendered webpage screenshot.",
+      async ({ args }) =>
+        browser.screenshot(args),
+      {
+        permission:
+          "browser.use"
+      }
+    ),
+
+    browser_run: tool(
+      "browser_run",
+      "Execute bounded browser code.",
+      async ({ args }) =>
+        browser.run(args),
+      {
+        permission:
+          "browser.use"
+      }
+    ),
+
+    qa_smoke_test: tool(
+      "qa_smoke_test",
+      "Run a production smoke test.",
+      async ({ args }) =>
+        qa.smokeTest(args),
+      {
+        permission:
+          "browser.use"
+      }
+    ),
+
+    qa_regression: tool(
+      "qa_regression",
+      "Run bounded browser journeys.",
+      async ({ args }) =>
+        qa.regression(args),
+      {
+        permission:
+          "browser.use"
+      }
+    ),
+
+    render_get_deployment: tool(
+      "render_get_deployment",
+      "Get a deployment by ID.",
+      async ({ args }) =>
+        render.getDeployment(args),
+      {
+        permission:
+          "deployment.read"
+      }
+    ),
+
+    render_list_deployments: tool(
+      "render_list_deployments",
+      "List recent deployments.",
+      async ({ args }) =>
+        render.listDeployments(args),
+      {
+        permission:
+          "deployment.read"
+      }
+    ),
+
+    render_logs: tool(
+      "render_logs",
+      "Fetch deployment logs.",
+      async ({ args }) =>
+        render.listLogs(args),
+      {
+        permission:
+          "deployment.read"
+      }
+    ),
+
+    render_deploy: tool(
+      "render_deploy",
+      "Trigger a production deployment.",
+      async ({ args }) =>
+        render.triggerDeploy(args),
+      {
+        permission:
+          "deployment.deploy",
+        requiresApproval: true
+      }
+    ),
+
+    render_rollback: tool(
+      "render_rollback",
+      "Roll back a production deployment.",
+      async ({ args }) =>
+        render.rollback?.(args),
+      {
+        permission:
+          "deployment.rollback",
+        requiresApproval: true
+      }
+    ),
+
+    cloudflare_worker_versions: tool(
+      "cloudflare_worker_versions",
+      "List Worker versions.",
+      async ({ args }) =>
+        cloudflare.workerVersions(args),
+      {
+        permission:
+          "deployment.read"
+      }
+    ),
+
+    cloudflare_d1_query: tool(
+      "cloudflare_d1_query",
+      "Run a D1 query.",
+      async ({ args }) =>
+        cloudflare.d1Query(args),
+      {
+        permission:
+          "database.read",
+        requiresApproval: true
+      }
+    ),
+
+    web_search: tool(
+      "web_search",
+      "Search the public web.",
+      async ({ args }) =>
+        web.search(args),
+      {
+        permission:
+          "web.search"
+      }
+    ),
+
+    web_fetch: tool(
+      "web_fetch",
+      "Fetch a public web page.",
+      async ({ args }) =>
+        web.fetchPage(args),
+      {
+        permission:
+          "web.fetch"
+      }
+    ),
+
+    get_users: tool(
+      "get_users",
+      "Get user analytics.",
+      async ({ args }) =>
+        analytics.users(args),
+      {
+        permission:
+          "database.read"
+      }
+    ),
+
+    get_audits: tool(
+      "get_audits",
+      "Get audit analytics.",
+      async ({ args }) =>
+        analytics.audits(args),
+      {
+        permission:
+          "database.read"
+      }
+    ),
+
+    get_revenue: tool(
+      "get_revenue",
+      "Get revenue analytics.",
+      async ({ args }) =>
+        analytics.revenue(args),
+      {
+        permission:
+          "database.read"
+      }
+    ),
+
+    get_campaign_stats: tool(
+      "get_campaign_stats",
+      "Get campaign analytics.",
+      async ({ args }) =>
+        analytics.campaignStats(args),
+      {
+        permission:
+          "database.read"
+      }
+    ),
+
+    get_analytics_overview: tool(
+      "get_analytics_overview",
+      "Get analytics overview.",
+      async ({ args }) =>
+        analytics.overview(args),
+      {
+        permission:
+          "database.read"
+      }
+    ),
+
+    metrics_snapshot: tool(
+      "metrics_snapshot",
+      "Get business KPI snapshot.",
+      async () =>
+        metrics.snapshot(),
+      {
+        permission:
+          "database.read"
+      }
+    ),
+
+    advanced_analytics: tool(
+      "advanced_analytics",
+      "Run advanced business analytics.",
+      async ({ args }) =>
+        advancedAnalytics[
+          args.mode || "health"
+        ](args),
+      {
+        permission:
+          "database.read"
+      }
+    ),
+
+    forecast_metrics: tool(
+      "forecast_metrics",
+      "Produce a directional business forecast.",
+      async ({ args }) =>
+        args.mode === "users"
+          ? forecasting.forecastUsers(
+              args
+            )
+          : forecasting.forecastRevenue(
+              args
+            ),
+      {
+        permission:
+          "database.read"
+      }
+    ),
+
+    create_experiment: tool(
+      "create_experiment",
+      "Create a measurable product experiment.",
+      async ({ args }) =>
+        experiments.create(args),
+      {
+        permission:
+          "database.write"
+      }
+    ),
+
+    record_experiment: tool(
+      "record_experiment",
+      "Record an experiment observation.",
+      async ({ args }) =>
+        experiments.record(args),
+      {
+        permission:
+          "database.write"
+      }
+    ),
+
+    save_lead: tool(
+      "save_lead",
+      "Create a sales lead.",
+      async ({ args }) =>
+        leads.create(args),
+      {
+        permission:
+          "database.write"
+      }
+    ),
+
+    list_leads: tool(
+      "list_leads",
+      "List sales leads.",
+      async ({ args }) =>
+        leads.list(args),
+      {
+        permission:
+          "database.read"
+      }
+    ),
+
+    qualify_lead: tool(
+      "qualify_lead",
+      "Update lead qualification.",
+      async ({ args }) =>
+        leads.qualify(args),
+      {
+        permission:
+          "database.write"
+      }
+    ),
+
+    verify_email: tool(
+      "verify_email",
+      "Verify a prospect email address.",
+      async ({ args }) =>
+        leads.verify(args),
+      {
+        permission:
+          "web.search"
+      }
+    ),
+
+    crm_update_lead: tool(
+      "crm_update_lead",
+      "Update a lead's pipeline state.",
+      async ({ args }) =>
+        crm.updateLead(args),
+      {
+        permission:
+          "database.write"
+      }
+    ),
+
+    campaign_create: tool(
+      "campaign_create",
+      "Create a campaign.",
+      async ({ args }) =>
+        campaigns.create(args),
+      {
+        permission:
+          "database.write"
+      }
+    ),
+
+    campaign_add_message: tool(
+      "campaign_add_message",
+      "Add a message to a campaign.",
+      async ({ args }) =>
+        campaigns.addMessage(args),
+      {
+        permission:
+          "database.write"
+      }
+    ),
+
+    campaign_send: tool(
+      "campaign_send",
+      "Send approved campaign messages.",
+      async ({ args }) =>
+        campaigns.send(args),
+      {
+        permission:
+          "communication.email",
+        requiresApproval: true
+      }
+    ),
+
+    email_send: tool(
+      "email_send",
+      "Send an approved customer or prospect email.",
+      async ({ args }) =>
+        email.send(args),
+      {
+        permission:
+          "communication.email",
+        requiresApproval: true
+      }
+    ),
+
+    get_customer: tool(
+      "get_customer",
+      "Find a customer.",
+      async ({ args }) =>
+        customers.get(args),
+      {
+        permission:
+          "customers.read"
+      }
+    ),
+
+    get_customer_audit: tool(
+      "get_customer_audit",
+      "Get a customer's latest audit.",
+      async ({ args }) =>
+        database.first(
           `
-          INSERT INTO leads
-          (company, website, reason, score, created_by, created_at)
-          VALUES (?, ?, ?, ?, ?, ?)
-          `
-        )
-        .bind(
-          args.company,
-          args.website ?? null,
-          args.reason,
-          Number(args.score),
-          agent.id,
-          now
-        )
-        .run();
-
-      return {
-        saved: true,
-        company: args.company,
-        score: Number(args.score)
-      };
-    }
-  },
-
-  get_campaign_stats: {
-    permission: "analytics.read",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "get_campaign_stats",
-        description:
-          "Retrieve campaign performance metrics.",
-        parameters: {
-          type: "object",
-          properties: {
-            campaignId: {
-              type: "string"
-            }
-          },
-          required: ["campaignId"],
-          additionalProperties: false
-        }
+          SELECT *
+          FROM audits
+          WHERE user_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1
+          `,
+          args.customerId
+        ),
+      {
+        permission:
+          "database.read"
       }
-    },
+    ),
 
-    async execute({ args, agent }) {
-      if (!agent.environment?.DB) {
-        return {
-          configured: false
-        };
+    create_support_ticket: tool(
+      "create_support_ticket",
+      "Create a support ticket.",
+      async ({ args }) =>
+        tickets.create(args),
+      {
+        permission:
+          "tickets.write"
       }
+    ),
 
-      const result =
-        await agent.environment.DB
-          .prepare(
-            `
-            SELECT *
-            FROM campaigns
-            WHERE id = ?
-            `
-          )
-          .bind(args.campaignId)
-          .first();
-
-      return result ?? {
-        found: false
-      };
-    }
-  },
-
-  get_users: {
-    permission: "analytics.read",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "get_users",
-        description:
-          "Retrieve user metrics for a date range.",
-        parameters: {
-          type: "object",
-          properties: {
-            from: { type: "string" },
-            to: { type: "string" }
-          },
-          required: ["from", "to"],
-          additionalProperties: false
-        }
+    update_support_ticket: tool(
+      "update_support_ticket",
+      "Update a support ticket.",
+      async ({ args }) =>
+        tickets.update(args),
+      {
+        permission:
+          "tickets.write"
       }
-    },
+    ),
 
-    async execute({ args, agent }) {
-      if (!agent.environment?.DB) {
-        return {
-          configured: false
-        };
+    escalate_support_ticket: tool(
+      "escalate_support_ticket",
+      "Escalate a support ticket.",
+      async ({ args }) =>
+        tickets.update({
+          ...args,
+          status: "escalated",
+          priority:
+            args.priority || "high"
+        }),
+      {
+        permission:
+          "tickets.write"
       }
+    ),
 
-      const result =
-        await agent.environment.DB
-          .prepare(
-            `
-            SELECT COUNT(*) AS total
-            FROM users
-            WHERE created_at >= ?
-              AND created_at <= ?
-            `
-          )
-          .bind(args.from, args.to)
-          .first();
-
-      return {
-        from: args.from,
-        to: args.to,
-        total: Number(
-          result?.total ?? 0
-        )
-      };
-    }
-  },
-
-  get_audits: {
-    permission: "analytics.read",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "get_audits",
-        description:
-          "Retrieve audit metrics for a date range.",
-        parameters: {
-          type: "object",
-          properties: {
-            from: { type: "string" },
-            to: { type: "string" }
-          },
-          required: ["from", "to"],
-          additionalProperties: false
-        }
+    customer_context: tool(
+      "customer_context",
+      "Build a customer support context.",
+      async ({ args }) =>
+        support.customerContext(
+          args
+        ),
+      {
+        permission:
+          "customers.read"
       }
-    },
+    ),
 
-    async execute({ args, agent }) {
-      if (!agent.environment?.DB) {
-        return {
-          configured: false
-        };
+    support_email_send: tool(
+      "support_email_send",
+      "Send an approved support email.",
+      async ({ args }) =>
+        support.replyByEmail(args),
+      {
+        permission:
+          "communication.email",
+        requiresApproval: true
       }
+    ),
 
-      const result =
-        await agent.environment.DB
-          .prepare(
-            `
-            SELECT COUNT(*) AS total
-            FROM audits
-            WHERE created_at >= ?
-              AND created_at <= ?
-            `
-          )
-          .bind(args.from, args.to)
-          .first();
-
-      return {
-        from: args.from,
-        to: args.to,
-        total: Number(
-          result?.total ?? 0
-        )
-      };
-    }
-  },
-
-  get_revenue: {
-    permission: "analytics.read",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "get_revenue",
-        description:
-          "Retrieve revenue for a period.",
-        parameters: {
-          type: "object",
-          properties: {
-            from: { type: "string" },
-            to: { type: "string" }
-          },
-          required: ["from", "to"],
-          additionalProperties: false
-        }
+    research_save: tool(
+      "research_save",
+      "Store a research finding.",
+      async ({ args }) =>
+        research.save(args),
+      {
+        permission:
+          "research.write"
       }
-    },
+    ),
 
-    async execute({ args, agent }) {
-      if (!agent.environment?.DB) {
-        return {
-          configured: false
-        };
+    research_search: tool(
+      "research_search",
+      "Search research memory.",
+      async ({ args }) =>
+        researchMemory.search(args),
+      {
+        permission:
+          "research.read"
       }
+    ),
 
-      const result =
-        await agent.environment.DB
-          .prepare(
-            `
-            SELECT COALESCE(SUM(amount), 0) AS revenue
-            FROM payments
-            WHERE created_at >= ?
-              AND created_at <= ?
-              AND status = 'paid'
-            `
-          )
-          .bind(args.from, args.to)
-          .first();
-
-      return {
-        from: args.from,
-        to: args.to,
-        revenue:
-          Number(
-            result?.revenue ?? 0
-          )
-      };
-    }
-  },
-
-  get_customer: {
-    permission: "database.read",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "get_customer",
-        description:
-          "Retrieve limited customer information.",
-        parameters: {
-          type: "object",
-          properties: {
-            customerId: {
-              type: "string"
-            }
-          },
-          required: ["customerId"],
-          additionalProperties: false
-        }
+    research_list: tool(
+      "research_list",
+      "List stored research.",
+      async ({ args }) =>
+        research.list(args),
+      {
+        permission:
+          "research.read"
       }
-    },
+    ),
 
-    async execute({ args, agent }) {
-      if (!agent.environment?.DB) {
-        return {
-          configured: false
-        };
+    research_alerts: tool(
+      "research_alerts",
+      "Create or list research alerts.",
+      async ({ args }) =>
+        args.action === "list"
+          ? research.listAlerts(args)
+          : research.createAlert(
+              args
+            ),
+      {
+        permission:
+          "research.alerts"
       }
+    ),
 
-      const result =
-        await agent.environment.DB
-          .prepare(
-            `
-            SELECT
-              id,
-              name,
-              email,
-              plan,
-              created_at
-            FROM users
-            WHERE id = ?
-            `
-          )
-          .bind(args.customerId)
-          .first();
-
-      return result ?? {
-        found: false
-      };
-    }
-  },
-
-  get_customer_audit: {
-    permission: "database.read",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "get_customer_audit",
-        description:
-          "Retrieve a customer's audit result.",
-        parameters: {
-          type: "object",
-          properties: {
-            auditId: {
-              type: "string"
-            }
-          },
-          required: ["auditId"],
-          additionalProperties: false
-        }
+    research_citation_save: tool(
+      "research_citation_save",
+      "Save a verified research source.",
+      async ({ args }) =>
+        citations.save(args),
+      {
+        permission:
+          "research.citations"
       }
-    },
+    ),
 
-    async execute({ args, agent }) {
-      if (!agent.environment?.DB) {
-        return {
-          configured: false
-        };
+    telegram_send: tool(
+      "telegram_send",
+      "Send a Telegram message.",
+      async ({ args }) =>
+        telegram.sendMessage(args),
+      {
+        permission:
+          "communication.telegram",
+        requiresApproval: true
       }
+    )
+  };
+}
 
-      const result =
-        await agent.environment.DB
-          .prepare(
-            `
-            SELECT *
-            FROM audits
-            WHERE id = ?
-            `
-          )
-          .bind(args.auditId)
-          .first();
-
-      return result ?? {
-        found: false
-      };
-    }
-  },
-
-  create_support_ticket: {
-    permission: "database.write",
-
-    definition: {
-      type: "function",
-      function: {
-        name: "create_support_ticket",
-        description:
-          "Create a customer support ticket.",
-        parameters: {
-          type: "object",
-          properties: {
-            customerId: {
-              type: "string"
-            },
-            subject: {
-              type: "string"
-            },
-            description: {
-              type: "string"
-            },
-            priority: {
-              type: "string",
-              enum: [
-                "low",
-                "normal",
-                "high",
-                "critical"
-              ]
-            }
-          },
-          required: [
-            "customerId",
-            "subject",
-            "description"
-          ],
-          additionalProperties: false
-        }
-      }
-    },
-
-    async execute({ args, agent }) {
-      if (!agent.environment?.DB) {
-        return {
-          configured: false
-        };
-      }
-
-      const id =
-        crypto.randomUUID();
-
-      await agent.environment.DB
-        .prepare(
-          `
-          INSERT INTO support_tickets
-          (id, customer_id, subject, description, priority, created_at)
-          VALUES (?, ?, ?, ?, ?, ?)
-          `
-        )
-        .bind(
-          id,
-          args.customerId,
-          args.subject,
-          args.description,
-          args.priority ?? "normal",
-          new Date().toISOString()
-        )
-        .run();
-
-      return {
-        created: true,
-        ticketId: id
-      };
-    }
-  }
-};
+/**
+ * Backwards-compatible export.
+ *
+ * Runtime should normally use createToolRegistry(env),
+ * but this keeps older imports from crashing during
+ * transitional deployments.
+ */
+export const TOOL_REGISTRY = {};
