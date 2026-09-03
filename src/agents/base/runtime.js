@@ -1,8 +1,12 @@
 // src/agents/base/runtime.js
 
-import { Agent } from "./Agent.js";
-import { MemoryManager } from "./memoryManager.js";
-import { ToolExecutor } from "./toolExecutor.js";
+import { Agent } from "./agent.js";
+import {
+  MemoryManager,
+} from "./memoryManager.js";
+import {
+  ToolExecutor,
+} from "./toolExecutor.js";
 
 import {
   getEnvironment,
@@ -20,17 +24,43 @@ import {
   createApprovalController,
 } from "../../telegram/approvals.js";
 
+import {
+  createPersistentStore,
+} from "../../core/persistentStore.js";
+
+import {
+  createApprovalGate,
+} from "../../security/approvalGate.js";
+
 const DEFAULT_TIMEOUT_MS =
   25000;
 
 function abortSignal(
   timeoutMs
 ) {
-  return AbortSignal.timeout(
+  const timeout =
     Number(timeoutMs) > 0
       ? Number(timeoutMs)
-      : DEFAULT_TIMEOUT_MS
+      : DEFAULT_TIMEOUT_MS;
+
+  if (
+    typeof AbortSignal?.timeout ===
+    "function"
+  ) {
+    return AbortSignal.timeout(
+      timeout
+    );
+  }
+
+  const controller =
+    new AbortController();
+
+  setTimeout(
+    () => controller.abort(),
+    timeout
   );
+
+  return controller.signal;
 }
 
 export class AgentRuntime {
@@ -41,7 +71,9 @@ export class AgentRuntime {
       );
 
     this.db =
-      options.db ?? null;
+      options.db ??
+      this.env.DB ??
+      null;
 
     this.logger =
       options.logger ?? console;
@@ -50,14 +82,37 @@ export class AgentRuntime {
       options.memoryManager ??
       new MemoryManager({
         db: this.db,
-        logger: this.logger,
+        logger:
+          this.logger,
       });
+
+    this.store =
+      options.store ??
+      createPersistentStore(
+        this.env
+      );
 
     this.approvalController =
       options.approvalController ??
       createApprovalController(
         this.env
       );
+
+    this.approvalGate =
+      options.approvalGate ??
+      createApprovalGate({
+        store:
+          this.store,
+
+        approvalController:
+          this.approvalController,
+
+        logger:
+          this.logger,
+
+        approvalTtlMs:
+          this.env.APPROVAL_TTL_MS,
+      });
 
     this.toolExecutor =
       options.toolExecutor ??
@@ -71,8 +126,14 @@ export class AgentRuntime {
         logger:
           this.logger,
 
+        store:
+          this.store,
+
         approvalController:
           this.approvalController,
+
+        approvalGate:
+          this.approvalGate,
       });
   }
 
@@ -98,14 +159,15 @@ export class AgentRuntime {
     agentId,
     task,
     context = {},
-  }) {
+  } = {}) {
     const agent =
       this.createAgent(
         agentId
       );
 
     if (
-      !task?.trim()
+      typeof task !== "string" ||
+      !task.trim()
     ) {
       throw new Error(
         "Task is required."
@@ -144,15 +206,15 @@ export class AgentRuntime {
       });
 
     const tools =
-      this.toolExecutor
-        .getDefinitionsForAgent(
-          agent
-        );
+      this.toolExecutor.getDefinitionsForAgent(
+        agent
+      );
 
     const messages = [
       {
         role: "system",
-        content: systemPrompt,
+        content:
+          systemPrompt,
       },
       {
         role: "user",
@@ -163,6 +225,7 @@ export class AgentRuntime {
 
     let llmCalls = 0;
     let toolCalls = 0;
+    let totalUsage = null;
 
     while (
       llmCalls <
@@ -175,8 +238,7 @@ export class AgentRuntime {
           messages,
           tools,
           model:
-            this.env
-              .OPENROUTER_MODEL,
+            this.env.OPENROUTER_MODEL,
           maxTokens:
             budget.maxOutputTokens,
         });
@@ -190,6 +252,10 @@ export class AgentRuntime {
           "LLM returned no message."
         );
       }
+
+      totalUsage =
+        response.usage ??
+        totalUsage;
 
       messages.push(
         message
@@ -208,6 +274,7 @@ export class AgentRuntime {
       ) {
         return {
           agent: agent.id,
+
           agentName:
             agent.name,
 
@@ -221,11 +288,12 @@ export class AgentRuntime {
               .OPENROUTER_MODEL,
 
           usage:
-            response.usage ??
-            null,
+            totalUsage,
 
           llmCalls,
           toolCalls,
+
+          incomplete: false,
         };
       }
 
@@ -260,6 +328,24 @@ export class AgentRuntime {
           toolCall?.function
             ?.name;
 
+        if (!functionName) {
+          messages.push({
+            role: "tool",
+
+            tool_call_id:
+              toolCall.id,
+
+            content:
+              JSON.stringify({
+                ok: false,
+                error:
+                  "LLM returned a tool call without a function name.",
+              }),
+          });
+
+          continue;
+        }
+
         const functionArguments =
           toolCall?.function
             ?.arguments ??
@@ -280,6 +366,10 @@ export class AgentRuntime {
 
             arguments:
               functionArguments,
+
+            approvalToken:
+              context?.approvalToken ??
+              null,
           });
 
         messages.push({
@@ -289,9 +379,9 @@ export class AgentRuntime {
             toolCall.id,
 
           content:
-            JSON.stringify(
+            this.serializeToolResult(
               result
-            ).slice(0, 15000),
+            ),
         });
       }
     }
@@ -309,7 +399,8 @@ export class AgentRuntime {
         this.env
           .OPENROUTER_MODEL,
 
-      usage: null,
+      usage:
+        totalUsage,
 
       llmCalls,
       toolCalls,
@@ -355,6 +446,12 @@ export class AgentRuntime {
       "- Never claim an action succeeded without verification.",
 
       "- Stay within your permissions.",
+
+      "- High-risk or destructive tools may require founder approval.",
+
+      "- Never attempt to bypass an approval gate.",
+
+      "- Never expose secrets, credentials, or approval tokens.",
 
       "- Stop when the task is complete.",
 
@@ -433,6 +530,28 @@ export class AgentRuntime {
       : "None.";
   }
 
+  serializeToolResult(
+    result
+  ) {
+    try {
+      const serialized =
+        JSON.stringify(
+          result
+        );
+
+      return serialized.slice(
+        0,
+        15000
+      );
+    } catch {
+      return JSON.stringify({
+        ok: false,
+        error:
+          "Tool result could not be serialized.",
+      });
+    }
+  }
+
   async callLLM({
     messages,
     tools,
@@ -449,6 +568,11 @@ export class AgentRuntime {
       );
     }
 
+    const baseUrl =
+      this.env
+        .OPENROUTER_BASE_URL ||
+      "https://openrouter.ai/api/v1";
+
     const body = {
       model:
         model ||
@@ -464,6 +588,7 @@ export class AgentRuntime {
     };
 
     if (
+      Array.isArray(tools) &&
       tools.length > 0
     ) {
       body.tools =
@@ -475,7 +600,7 @@ export class AgentRuntime {
 
     const response =
       await fetch(
-        `${this.env.OPENROUTER_BASE_URL}/chat/completions`,
+        `${baseUrl}/chat/completions`,
         {
           method: "POST",
 
@@ -523,6 +648,6 @@ export class AgentRuntime {
       );
     }
 
-    return await response.json();
+    return response.json();
   }
 }
