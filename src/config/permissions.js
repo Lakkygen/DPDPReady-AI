@@ -6,6 +6,7 @@
  * Principle:
  * - deny by default
  * - grant only what an agent needs
+ * - permissions are checked by ToolExecutor
  */
 
 export const PERMISSIONS = {
@@ -25,19 +26,29 @@ export const PERMISSIONS = {
     deployment: {
       read: true,
       restart: true,
-      deploy: false,
-      rollback: false
+      deploy: true,
+      rollback: true
     },
 
     database: {
       read: true,
-      write: false,
+      write: true,
       admin: false
     },
 
     web: {
       search: true,
       fetch: true
+    },
+
+    browser: {
+      read: true,
+      use: true
+    },
+
+    code: {
+      read: true,
+      write: true
     },
 
     analytics: {
@@ -49,9 +60,41 @@ export const PERMISSIONS = {
       write: false
     },
 
+    campaigns: {
+      read: true,
+      write: false
+    },
+
+    customers: {
+      read: true,
+      write: false
+    },
+
+    tickets: {
+      read: true,
+      write: true
+    },
+
+    research: {
+      read: true,
+      write: true,
+      alerts: true,
+      citations: true
+    },
+
+    experiments: {
+      read: true,
+      write: false
+    },
+
+    metrics: {
+      read: true
+    },
+
     communication: {
       telegram: true,
-      email: false
+      email: false,
+      send: true
     }
   },
 
@@ -76,14 +119,24 @@ export const PERMISSIONS = {
     },
 
     database: {
-      read: false,
-      write: false,
+      read: true,
+      write: true,
       admin: false
     },
 
     web: {
       search: true,
       fetch: true
+    },
+
+    browser: {
+      read: false,
+      use: false
+    },
+
+    code: {
+      read: false,
+      write: false
     },
 
     analytics: {
@@ -95,9 +148,41 @@ export const PERMISSIONS = {
       write: true
     },
 
+    campaigns: {
+      read: true,
+      write: true
+    },
+
+    customers: {
+      read: true,
+      write: false
+    },
+
+    tickets: {
+      read: false,
+      write: false
+    },
+
+    research: {
+      read: true,
+      write: false,
+      alerts: false,
+      citations: false
+    },
+
+    experiments: {
+      read: true,
+      write: false
+    },
+
+    metrics: {
+      read: true
+    },
+
     communication: {
       telegram: true,
-      email: true
+      email: true,
+      send: true
     }
   },
 
@@ -122,14 +207,24 @@ export const PERMISSIONS = {
     },
 
     database: {
-      read: false,
-      write: false,
+      read: true,
+      write: true,
       admin: false
     },
 
     web: {
       search: true,
       fetch: true
+    },
+
+    browser: {
+      read: false,
+      use: false
+    },
+
+    code: {
+      read: false,
+      write: false
     },
 
     analytics: {
@@ -141,9 +236,41 @@ export const PERMISSIONS = {
       write: false
     },
 
+    campaigns: {
+      read: false,
+      write: false
+    },
+
+    customers: {
+      read: false,
+      write: false
+    },
+
+    tickets: {
+      read: false,
+      write: false
+    },
+
+    research: {
+      read: true,
+      write: true,
+      alerts: true,
+      citations: true
+    },
+
+    experiments: {
+      read: false,
+      write: false
+    },
+
+    metrics: {
+      read: false
+    },
+
     communication: {
       telegram: true,
-      email: false
+      email: false,
+      send: true
     }
   },
 
@@ -169,13 +296,23 @@ export const PERMISSIONS = {
 
     database: {
       read: true,
-      write: false,
+      write: true,
       admin: false
     },
 
     web: {
       search: false,
       fetch: false
+    },
+
+    browser: {
+      read: false,
+      use: false
+    },
+
+    code: {
+      read: false,
+      write: false
     },
 
     analytics: {
@@ -187,9 +324,41 @@ export const PERMISSIONS = {
       write: false
     },
 
+    campaigns: {
+      read: true,
+      write: false
+    },
+
+    customers: {
+      read: true,
+      write: false
+    },
+
+    tickets: {
+      read: true,
+      write: false
+    },
+
+    research: {
+      read: false,
+      write: false,
+      alerts: false,
+      citations: false
+    },
+
+    experiments: {
+      read: true,
+      write: true
+    },
+
+    metrics: {
+      read: true
+    },
+
     communication: {
       telegram: true,
-      email: false
+      email: false,
+      send: true
     }
   },
 
@@ -215,13 +384,23 @@ export const PERMISSIONS = {
 
     database: {
       read: true,
-      write: false,
+      write: true,
       admin: false
     },
 
     web: {
       search: false,
       fetch: false
+    },
+
+    browser: {
+      read: false,
+      use: false
+    },
+
+    code: {
+      read: false,
+      write: false
     },
 
     analytics: {
@@ -233,19 +412,45 @@ export const PERMISSIONS = {
       write: false
     },
 
+    campaigns: {
+      read: false,
+      write: false
+    },
+
+    customers: {
+      read: true,
+      write: true
+    },
+
+    tickets: {
+      read: true,
+      write: true
+    },
+
+    research: {
+      read: false,
+      write: false,
+      alerts: false,
+      citations: false
+    },
+
+    experiments: {
+      read: false,
+      write: false
+    },
+
+    metrics: {
+      read: false
+    },
+
     communication: {
       telegram: true,
-      email: true
+      email: true,
+      send: true
     }
   }
 };
 
-/**
- * Safely checks whether an agent has a permission.
- *
- * Example:
- * hasPermission("ops", "github.write")
- */
 export function hasPermission(agentId, path) {
   const profile = PERMISSIONS[agentId];
 
