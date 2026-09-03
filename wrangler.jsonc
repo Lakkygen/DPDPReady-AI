@@ -1,36 +1,32 @@
-{
-  "$schema": "node_modules/wrangler/config-schema.json",
+npx wrangler secret put OPENROUTER_API_KEY
+npx wrangler secret put TELEGRAM_GROUP_ID
 
-  "name": "dpdpready-ai",
+# Bot tokens
+npx wrangler secret put OPS_BOT_TOKEN
+npx wrangler secret put GROWTH_BOT_TOKEN
+npx wrangler secret put RESEARCH_BOT_TOKEN
+npx wrangler secret put ANALYST_BOT_TOKEN
+npx wrangler secret put SUPPORT_BOT_TOKEN
 
-  "main": "src/index.js",
+# GitHub
+npx wrangler secret put GITHUB_TOKEN
+npx wrangler secret put GITHUB_OWNER
+npx wrangler secret put GITHUB_REPO
 
-  "compatibility_date": "2026-09-01",
+# Render
+npx wrangler secret put RENDER_API_KEY
+npx wrangler secret put RENDER_SERVICE_ID
 
-  "workers_dev": true,
+# Cloudflare
+npx wrangler secret put CLOUDFLARE_API_TOKEN
+npx wrangler secret put CLOUDFLARE_ACCOUNT_ID
 
-  "vars": {
-    "APP_NAME": "DPDPReady AI",
-    "APP_URL": "https://dpdpready.online",
-    "OPENROUTER_MODEL": "google/gemini-2.5-flash-preview",
-    "OPENROUTER_FALLBACK_MODEL": "openrouter/free"
-  },
+# Admin auth
+npx wrangler secret put ADMIN_API_TOKEN
 
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "dpdpready-ai",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
-    }
-  ],
+# Email (adjust to whatever your email provider needs)
+npx wrangler secret put EMAIL_API_KEY
+npx wrangler secret put EMAIL_FROM_ADDRESS
 
-  "triggers": {
-    "crons": [
-      "*/10 * * * *"
-    ]
-  },
-
-  "observability": {
-    "enabled": true
-  }
-}
+# Webhook secret (new — see step 6)
+npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
