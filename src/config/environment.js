@@ -4,65 +4,49 @@ export function getEnvironment(env) {
   return {
     ...env,
 
-    APP_NAME:
-      env.APP_NAME ||
-      "DPDPReady AI",
+    APP_NAME: env.APP_NAME || "DPDPReady AI",
+    APP_URL: env.APP_URL || "https://dpdpready.onrender.com",
+    BOT_HOST: env.BOT_HOST || "dpdpready-ai.workers.dev",
 
-    APP_URL:
-      env.APP_URL ||
-      "https://dpdpready.online",
+    AGENTROUTER_BASE_URL:
+      env.AGENTROUTER_BASE_URL || "https://openrouter.ai/api/v1",
 
-    BOT_HOST:
-      env.BOT_HOST ||
-      "dpdpready-ai.workers.dev",
+    AGENTROUTER_MODEL:
+      env.AGENTROUTER_MODEL || "google/gemini-2.5-flash-preview",
 
-    OPENROUTER_BASE_URL:
-      env.OPENROUTER_BASE_URL ||
-      "https://openrouter.ai/api/v1",
+    AGENTROUTER_FALLBACK_MODEL:
+      env.AGENTROUTER_FALLBACK_MODEL || "openrouter/free",
 
-    OPENROUTER_MODEL:
-      env.OPENROUTER_MODEL ||
-      "google/gemini-2.5-flash-preview",
-
-    OPENROUTER_FALLBACK_MODEL:
-      env.OPENROUTER_FALLBACK_MODEL ||
-      "openrouter/free",
-
-    LLM_TIMEOUT_MS:
-      Number(
-        env.LLM_TIMEOUT_MS || 25000
-      )
+    LLM_TIMEOUT_MS: Number(env.LLM_TIMEOUT_MS || 25000)
   };
 }
 
-export function validateEnvironment(
-  env,
-  { strict = true } = {}
-) {
+export function validateEnvironment(env, { strict = true } = {}) {
   const required = [
-    "OPENROUTER_API_KEY",
-    "TELEGRAM_GROUP_ID"
+    "AGENTROUTER_API_KEY",
+    "TELEGRAM_GROUP_ID",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_WEBHOOK_SECRET"
   ];
 
-  const missing =
-    required.filter(
-      (key) => !env?.[key]
-    );
+  const recommended = [
+    "ADMIN_API_TOKEN",
+    "FOUNDER_API_TOKEN",
+    "APP_URL"
+  ];
 
-  if (
-    strict &&
-    missing.length
-  ) {
+  const missingRequired = required.filter((key) => !env?.[key]);
+  const missingRecommended = recommended.filter((key) => !env?.[key]);
+
+  if (strict && missingRequired.length > 0) {
     throw new Error(
-      `Missing required environment values: ${missing.join(
-        ", "
-      )}`
+      `Missing required environment values: ${missingRequired.join(", ")}`
     );
   }
 
   return {
-    valid:
-      missing.length === 0,
-    missing
+    valid: missingRequired.length === 0,
+    missing: missingRequired,
+    missingRecommended
   };
 }
