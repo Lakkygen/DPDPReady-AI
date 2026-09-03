@@ -1,6 +1,12 @@
 // src/index.js
 
-import { AgentRuntime } from "./agents/base/runtime.js";
+import {
+  AgentRuntime
+} from "./agents/base/runtime.js";
+
+import {
+  MemoryManager
+} from "./agents/base/memoryManager.js";
 
 import {
   validateEnvironment
@@ -22,7 +28,14 @@ import {
   COMPANY
 } from "./config/company.js";
 
-function json(data, status = 200) {
+import {
+  TeamCoordinator
+} from "./team/coordinator.js";
+
+function json(
+  data,
+  status = 200
+) {
   return new Response(
     JSON.stringify(
       data,
@@ -33,33 +46,77 @@ function json(data, status = 200) {
       status,
       headers: {
         "Content-Type":
-          "application/json; charset=utf-8"
+          "application/json; charset=utf-8",
+        "Cache-Control":
+          "no-store"
       }
     }
   );
 }
 
+function getTeamChatId(env) {
+  return (
+    env.TELEGRAM_TEAM_CHAT_ID ??
+    env.TELEGRAM_GROUP_ID ??
+    env.FOUNDER_CHAT_ID ??
+    null
+  );
+}
+
 function createServices(env) {
+  const logger =
+    console;
+
+  /*
+   * One memory manager instance is shared
+   * across runtime, agents and team chat.
+   */
+  const memoryManager =
+    new MemoryManager({
+      db:
+        env.DB ?? null,
+      logger
+    });
+
   const runtime =
     new AgentRuntime({
       env,
-      db: env.DB ?? null
+      db:
+        env.DB ?? null,
+      logger,
+      memoryManager
     });
 
   const orchestrator =
     new Orchestrator({
       env,
-      db: env.DB ?? null,
-      runtime
+      db:
+        env.DB ?? null,
+      logger,
+      runtime,
+      memoryManager
     });
 
   const scheduler =
-    new Scheduler();
+    new Scheduler({
+      logger
+    });
+
+  const teamCoordinator =
+    new TeamCoordinator({
+      env,
+      orchestrator,
+      runtime,
+      memoryManager,
+      logger
+    });
 
   return {
     runtime,
     orchestrator,
-    scheduler
+    scheduler,
+    memoryManager,
+    teamCoordinator
   };
 }
 
@@ -77,7 +134,8 @@ async function handleTelegramWebhook(
     return json(
       {
         ok: false,
-        error: "Invalid JSON."
+        error:
+          "Invalid JSON."
       },
       400
     );
@@ -89,7 +147,8 @@ async function handleTelegramWebhook(
         update,
         env,
         services.orchestrator,
-        services.runtime
+        services.runtime,
+        services.teamCoordinator
       );
 
     return json({
@@ -102,15 +161,107 @@ async function handleTelegramWebhook(
       error
     );
 
-    return json({
-      ok: false,
-      error:
-        String(
-          error?.message ??
+    return json(
+      {
+        ok: false,
+        error:
           "Telegram processing failed."
-        )
-    });
+      },
+      500
+    );
   }
+}
+
+async function runScheduledHealthCheck(
+  env,
+  services
+) {
+  const opsAgent =
+    services.orchestrator
+      .getAgent("ops");
+
+  if (!opsAgent) {
+    throw new Error(
+      "Ops agent is not configured."
+    );
+  }
+
+  const result =
+    await services.runtime
+      .toolExecutor
+      .execute({
+        agent:
+          opsAgent,
+
+        toolName:
+          "health_check",
+
+        arguments: {
+          url:
+            env.APP_URL ??
+            "https://dpdpready.online"
+        }
+      });
+
+  console.log(
+    "Scheduled health result:",
+    result
+  );
+
+  /*
+   * Don't wake the LLM merely to check health.
+   * Only start the team conversation when
+   * the deterministic check reports a problem.
+   */
+  if (
+    !result ||
+    result.ok !== true
+  ) {
+    const chatId =
+      getTeamChatId(env);
+
+    if (!chatId) {
+      console.warn(
+        "Health check failed but no Telegram team chat is configured."
+      );
+
+      return {
+        ok: false,
+        notified: false,
+        result
+      };
+    }
+
+    await services.teamCoordinator
+      .announceIncident({
+        chatId,
+        message: [
+          "🚨 PRODUCTION HEALTH CHECK FAILED",
+          "",
+          "Marcus detected a production health problem.",
+          "",
+          `Health result: ${JSON.stringify(
+            result
+          ).slice(0, 2500)}`,
+          "",
+          "The team is investigating automatically."
+        ].join("\n"),
+        triggerAgentId:
+          "ops"
+      });
+
+    return {
+      ok: false,
+      notified: true,
+      result
+    };
+  }
+
+  return {
+    ok: true,
+    notified: false,
+    result
+  };
 }
 
 export default {
@@ -127,17 +278,24 @@ export default {
 
     try {
       if (
+        request.method ===
+          "GET" &&
         url.pathname === "/"
       ) {
         return json({
           ok: true,
-          service: COMPANY.name,
-          status: "online"
+          service:
+            COMPANY.name,
+          status:
+            "online"
         });
       }
 
       if (
-        url.pathname === "/health"
+        request.method ===
+          "GET" &&
+        url.pathname ===
+          "/health"
       ) {
         const validation =
           validateEnvironment(
@@ -149,11 +307,22 @@ export default {
 
         return json({
           ok: true,
-          service: COMPANY.id,
+          service:
+            COMPANY.id,
           timestamp:
             new Date().toISOString(),
           environment:
-            validation
+            validation,
+          teamChatConfigured:
+            Boolean(
+              getTeamChatId(
+                env
+              )
+            ),
+          databaseConfigured:
+            Boolean(
+              env.DB
+            )
         });
       }
 
@@ -161,6 +330,20 @@ export default {
         url.pathname ===
         "/telegram/webhook"
       ) {
+        if (
+          request.method !==
+          "POST"
+        ) {
+          return json(
+            {
+              ok: false,
+              error:
+                "Method not allowed."
+            },
+            405
+          );
+        }
+
         return handleTelegramWebhook(
           request,
           env,
@@ -169,20 +352,52 @@ export default {
       }
 
       if (
-        url.pathname === "/test-agent" &&
-        request.method === "POST"
+        url.pathname ===
+          "/test-agent" &&
+        request.method ===
+          "POST"
       ) {
-        const body =
-          await request.json();
+        let body;
+
+        try {
+          body =
+            await request.json();
+        } catch {
+          return json(
+            {
+              ok: false,
+              error:
+                "Invalid JSON."
+            },
+            400
+          );
+        }
+
+        if (
+          !body?.agentId ||
+          !body?.task
+        ) {
+          return json(
+            {
+              ok: false,
+              error:
+                "agentId and task are required."
+            },
+            400
+          );
+        }
 
         const result =
           await services.runtime.run({
             agentId:
               body.agentId,
+
             task:
               body.task,
+
             context:
-              body.context ?? {}
+              body.context ??
+              {}
           });
 
         return json({
@@ -194,7 +409,8 @@ export default {
       return json(
         {
           ok: false,
-          error: "Not found"
+          error:
+            "Not found"
         },
         404
       );
@@ -208,10 +424,7 @@ export default {
         {
           ok: false,
           error:
-            String(
-              error?.message ??
-              "Internal server error"
-            )
+            "Internal server error"
         },
         500
       );
@@ -226,51 +439,58 @@ export default {
     const services =
       createServices(env);
 
-    /**
-     * Deterministic scheduled work first.
-     * No LLM call is needed merely to wake up.
-     */
-
     ctx.waitUntil(
       (async () => {
         try {
-          const result =
-            await services.runtime
-              .toolExecutor
-              .execute({
-                agent:
-                  services.orchestrator
-                    .getAgent("ops"),
-
-                toolName:
-                  "health_check",
-
-                arguments: {
-                  url:
-                    env.APP_URL ||
-                    "https://dpdpready.online"
-                }
-              });
-
-          console.log(
-            "Scheduled health result:",
-            result
+          await runScheduledHealthCheck(
+            env,
+            services
           );
-
-          if (!result.ok) {
-            /**
-             * Later:
-             * create incident task for Marcus.
-             *
-             * Notice that normal health
-             * checks still don't spend LLM tokens.
-             */
-          }
         } catch (error) {
           console.error(
             "Scheduled health check failed:",
             error
           );
+
+          const chatId =
+            getTeamChatId(
+              env
+            );
+
+          if (!chatId) {
+            return;
+          }
+
+          try {
+            await services
+              .teamCoordinator
+              .announceIncident({
+                chatId,
+
+                message: [
+                  "🚨 HEALTH CHECK EXECUTION FAILED",
+                  "",
+                  "Marcus could not complete the scheduled production health check.",
+                  "",
+                  `Error: ${
+                    error?.message ??
+                    "Unknown error"
+                  }`,
+                  "",
+                  "The team is investigating the failure."
+                ].join("\n"),
+
+                triggerAgentId:
+                  "ops"
+              });
+          } catch (
+            teamError
+          ) {
+            console.error(
+              "Team incident handling failed:",
+              teamError
+            );
+          }
         }
       })()
     );
