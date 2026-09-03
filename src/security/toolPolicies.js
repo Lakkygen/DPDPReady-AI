@@ -1,381 +1,447 @@
-// ============================================================
-// DPDPREADY AI — TOOL SECURITY POLICIES
-// Central risk classification for every agent tool.
-// ============================================================
+// src/security/toolPolicies.js
 
-export const TOOL_POLICIES = {
-  // ----------------------------------------------------------
-  // SAFE READ-ONLY OPERATIONS
-  // ----------------------------------------------------------
+const RISK = Object.freeze({
+  LOW: "low",
+  MEDIUM: "medium",
+  HIGH: "high",
+  CRITICAL: "critical"
+});
 
+export const TOOL_POLICIES = Object.freeze({
   health_check: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: [],
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
   },
 
-  website_inspect: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["web.read"],
+  get_logs: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
   },
 
-  web_search: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["web.search"],
-  },
-
-  web_fetch: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["web.read"],
+  get_deployment: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
   },
 
   github_repository: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["github.read"],
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
   },
 
   github_get_branch: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["github.read"],
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
   },
 
   github_list_branches: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["github.read"],
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
   },
 
   github_get_file: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["github.read"],
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
   },
 
-  github_get_pr: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["github.read"],
+  github_compare: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
   },
 
-  github_list_prs: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["github.read"],
+  create_branch: {
+    risk: RISK.HIGH,
+    approval: true,
+    roles: ["ops"]
   },
 
-  render_get_deployment: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["deployment.read"],
-  },
-
-  render_list_deployments: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["deployment.read"],
-  },
-
-  render_logs: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["deployment.read"],
-  },
-
-  cloudflare_worker_versions: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["deployment.read"],
-  },
-
-  get_users: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["analytics.read"],
-  },
-
-  get_audits: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["analytics.read"],
-  },
-
-  get_revenue: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["analytics.read"],
-  },
-
-  get_campaign_stats: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["analytics.read"],
-  },
-
-  get_analytics_overview: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["analytics.read"],
-  },
-
-  // ----------------------------------------------------------
-  // ENGINEERING / WRITE OPERATIONS
-  // ----------------------------------------------------------
-
-  code_read_file: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["github.read"],
-  },
-
-  code_search: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["github.read"],
+  create_pull_request: {
+    risk: RISK.HIGH,
+    approval: true,
+    roles: ["ops"]
   },
 
   github_create_branch: {
-    risk: "medium",
-    requiresApproval: true,
-    permissions: ["github.createBranch"],
+    risk: RISK.HIGH,
+    approval: true,
+    roles: ["ops"]
   },
 
   github_update_file: {
-    risk: "high",
-    requiresApproval: true,
-    permissions: ["github.write"],
+    risk: RISK.HIGH,
+    approval: true,
+    roles: ["ops"]
   },
 
   github_create_pr: {
-    risk: "medium",
-    requiresApproval: true,
-    permissions: ["github.createPR"],
+    risk: RISK.HIGH,
+    approval: true,
+    roles: ["ops"]
   },
 
-  github_merge_pr: {
-    risk: "critical",
-    requiresApproval: true,
-    permissions: ["github.merge"],
+  code_read_file: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
   },
 
-  render_deploy: {
-    risk: "critical",
-    requiresApproval: true,
-    permissions: ["deployment.deploy"],
+  code_replace_exact: {
+    risk: RISK.HIGH,
+    approval: true,
+    roles: ["ops"]
   },
 
-  render_rollback: {
-    risk: "critical",
-    requiresApproval: true,
-    permissions: ["deployment.deploy"],
+  code_apply_patch: {
+    risk: RISK.HIGH,
+    approval: true,
+    roles: ["ops"]
   },
 
-  cloudflare_d1_query: {
-    risk: "medium",
-    requiresApproval: true,
-    permissions: ["database.read"],
+  code_basic_syntax_check: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
   },
 
-  // ----------------------------------------------------------
-  // BROWSER / QA
-  // ----------------------------------------------------------
-
-  browser_open: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["browser.read"],
+  browser_check_page: {
+    risk: RISK.MEDIUM,
+    approval: false,
+    roles: ["ops"]
   },
 
   browser_screenshot: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["browser.read"],
+    risk: RISK.MEDIUM,
+    approval: false,
+    roles: ["ops"]
   },
 
   browser_run: {
-    risk: "medium",
-    requiresApproval: false,
-    permissions: ["browser.execute"],
+    risk: RISK.HIGH,
+    approval: false,
+    roles: ["ops"]
   },
 
-  qa_run: {
-    risk: "medium",
-    requiresApproval: false,
-    permissions: ["browser.execute"],
+  qa_smoke_test: {
+    risk: RISK.MEDIUM,
+    approval: false,
+    roles: ["ops"]
   },
 
-  // ----------------------------------------------------------
-  // SALES / COMMUNICATION
-  // ----------------------------------------------------------
-
-  lead_create: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["leads.write"],
+  qa_regression: {
+    risk: RISK.MEDIUM,
+    approval: false,
+    roles: ["ops"]
   },
 
-  lead_update: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["leads.write"],
+  render_get_deployment: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
   },
 
-  lead_search: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["leads.read"],
+  render_list_deployments: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
+  },
+
+  render_logs: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
+  },
+
+  render_deploy: {
+    risk: RISK.CRITICAL,
+    approval: true,
+    roles: ["ops"]
+  },
+
+  render_rollback: {
+    risk: RISK.CRITICAL,
+    approval: true,
+    roles: ["ops"]
+  },
+
+  cloudflare_worker_versions: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["ops"]
+  },
+
+  cloudflare_d1_query: {
+    risk: RISK.HIGH,
+    approval: true,
+    roles: ["ops", "analyst"]
+  },
+
+  web_search: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["growth", "research"]
+  },
+
+  web_fetch: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["growth", "research"]
+  },
+
+  get_users: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["analyst"]
+  },
+
+  get_audits: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["analyst", "support"]
+  },
+
+  get_revenue: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["analyst"]
+  },
+
+  get_campaign_stats: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["growth", "analyst"]
+  },
+
+  get_analytics_overview: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["growth"]
+  },
+
+  metrics_snapshot: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["analyst"]
+  },
+
+  advanced_analytics: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["analyst"]
+  },
+
+  forecast_metrics: {
+    risk: RISK.MEDIUM,
+    approval: false,
+    roles: ["analyst"]
+  },
+
+  create_experiment: {
+    risk: RISK.MEDIUM,
+    approval: false,
+    roles: ["analyst"]
+  },
+
+  record_experiment: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["analyst"]
+  },
+
+  save_lead: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["growth"]
+  },
+
+  list_leads: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["growth"]
+  },
+
+  qualify_lead: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["growth"]
+  },
+
+  verify_email: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["growth"]
+  },
+
+  crm_update_lead: {
+    risk: RISK.MEDIUM,
+    approval: false,
+    roles: ["growth"]
   },
 
   campaign_create: {
-    risk: "medium",
-    requiresApproval: false,
-    permissions: ["campaigns.write"],
+    risk: RISK.MEDIUM,
+    approval: false,
+    roles: ["growth"]
   },
 
-  campaign_start: {
-    risk: "high",
-    requiresApproval: true,
-    permissions: ["campaigns.send"],
+  campaign_add_message: {
+    risk: RISK.MEDIUM,
+    approval: false,
+    roles: ["growth"]
   },
 
-  email_verify: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["email.verify"],
+  campaign_send: {
+    risk: RISK.CRITICAL,
+    approval: true,
+    roles: ["growth"]
   },
 
   email_send: {
-    risk: "high",
-    requiresApproval: true,
-    permissions: ["communication.email"],
+    risk: RISK.CRITICAL,
+    approval: true,
+    roles: ["growth", "support"]
   },
 
-  email_reply: {
-    risk: "high",
-    requiresApproval: true,
-    permissions: ["communication.email"],
+  get_customer: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["support"]
   },
 
-  // ----------------------------------------------------------
-  // CUSTOMER SUPPORT
-  // ----------------------------------------------------------
-
-  customer_get: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["customers.read"],
+  get_customer_audit: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["support"]
   },
 
-  customer_update: {
-    risk: "medium",
-    requiresApproval: false,
-    permissions: ["customers.write"],
+  create_support_ticket: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["support"]
   },
 
-  ticket_create: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["support.write"],
+  update_support_ticket: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["support"]
   },
 
-  ticket_update: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["support.write"],
+  escalate_support_ticket: {
+    risk: RISK.MEDIUM,
+    approval: false,
+    roles: ["support"]
   },
 
-  ticket_escalate: {
-    risk: "medium",
-    requiresApproval: false,
-    permissions: ["support.write"],
+  customer_context: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["support"]
   },
 
-  // ----------------------------------------------------------
-  // RESEARCH
-  // ----------------------------------------------------------
-
-  research_search: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["research.read"],
+  support_email_send: {
+    risk: RISK.CRITICAL,
+    approval: true,
+    roles: ["support"]
   },
 
   research_save: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["research.write"],
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["research"]
   },
 
-  citation_save: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["research.write"],
+  research_search: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["research"]
   },
 
-  regulatory_alert: {
-    risk: "medium",
-    requiresApproval: false,
-    permissions: ["research.write"],
+  research_list: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["research"]
   },
 
-  // ----------------------------------------------------------
-  // ANALYTICS
-  // ----------------------------------------------------------
-
-  metrics_get: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["analytics.read"],
+  research_alerts: {
+    risk: RISK.MEDIUM,
+    approval: false,
+    roles: ["research"]
   },
 
-  analytics_advanced: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["analytics.read"],
+  research_citation_save: {
+    risk: RISK.LOW,
+    approval: false,
+    roles: ["research"]
   },
 
-  experiment_create: {
-    risk: "medium",
-    requiresApproval: false,
-    permissions: ["analytics.write"],
-  },
+  telegram_send: {
+    risk: RISK.HIGH,
+    approval: true,
+    roles: ["ops", "growth", "research", "analyst", "support"]
+  }
+});
 
-  experiment_start: {
-    risk: "medium",
-    requiresApproval: true,
-    permissions: ["analytics.write"],
-  },
+const DEFAULT_POLICY = Object.freeze({
+  risk: RISK.HIGH,
+  approval: true,
+  roles: []
+});
 
-  forecast_generate: {
-    risk: "low",
-    requiresApproval: false,
-    permissions: ["analytics.read"],
-  },
-};
+const AGENT_ROLE_ALIASES = Object.freeze({
+  marcus: "ops",
+  operations: "ops",
+  ops: "ops",
+
+  amara: "growth",
+  growth: "growth",
+
+  david: "research",
+  research: "research",
+
+  sofia: "analyst",
+  analyst: "analyst",
+  analytics: "analyst",
+
+  maya: "support",
+  support: "support"
+});
 
 export function getToolPolicy(toolName) {
+  return TOOL_POLICIES[toolName] ?? DEFAULT_POLICY;
+}
+
+export function requiresFounderApproval(toolName) {
+  return Boolean(getToolPolicy(toolName).approval);
+}
+
+export function isRoleAllowed(toolName, role) {
+  const policy = getToolPolicy(toolName);
+
+  const normalized =
+    AGENT_ROLE_ALIASES[
+      String(role ?? "").toLowerCase()
+    ] ??
+    String(role ?? "").toLowerCase();
+
   return (
-    TOOL_POLICIES[toolName] || {
-      risk: "critical",
-      requiresApproval: true,
-      permissions: [],
-      unknown: true,
-    }
+    !policy.roles.length ||
+    policy.roles.includes(normalized)
   );
 }
 
-export function toolRequiresApproval(toolName) {
-  return getToolPolicy(toolName).requiresApproval === true;
+export function describeToolPolicy(toolName) {
+  const policy = getToolPolicy(toolName);
+
+  return {
+    tool: toolName,
+    ...policy
+  };
 }
 
-export function getToolRisk(toolName) {
-  return getToolPolicy(toolName).risk;
-}
-
-export function getToolPermissions(toolName) {
-  return getToolPolicy(toolName).permissions || [];
-}
+export { RISK };
