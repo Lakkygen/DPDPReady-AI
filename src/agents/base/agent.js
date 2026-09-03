@@ -1,6 +1,6 @@
 // src/agents/base/Agent.js
 
-import { requireAgent } from "../../config/agents.js";
+import { requireAgent } from "../../config/agent.js";
 import {
   getPermissions,
   hasPermission
