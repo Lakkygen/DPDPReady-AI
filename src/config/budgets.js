@@ -7,6 +7,17 @@
  * during a single task.
  */
 
+export const GLOBAL_LIMITS = {
+  maxTasksPerMinute: 20,
+  maxConcurrentTasks: 10,
+  maxAgentDelegationsPerTask: 3,
+
+  maxTeamConversationRounds: 4,
+  maxTeamConversationMessages: 10,
+  maxTeamParticipants: 4,
+  maxTeamIncidentsPerHour: 20
+};
+
 export const DEFAULT_BUDGET = {
   maxLLMCallsPerTask: 3,
   maxToolCallsPerTask: 8,
