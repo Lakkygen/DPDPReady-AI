@@ -1,14 +1,7 @@
-import {
-  createPersistentStore,
-} from "../core/persistentStore.js";
+import { createPersistentStore } from "../core/persistentStore.js";
+import { createTelegramClient } from "../tools/communication.js";
 
-import {
-  createTelegramClient,
-} from "../tools/communication.js";
-
-function escapeHtml(
-  value
-) {
+function escapeHtml(value) {
   return String(
     value ?? ""
   )
@@ -41,22 +34,17 @@ function createKeyboard(
     inline_keyboard: [
       [
         {
-          text:
-            "✅ Approve",
-
+          text: "✅ Approve",
           callback_data:
-            `approval:${approvalId}:approved`,
+            `approval:${approvalId}:approved`
         },
-
         {
-          text:
-            "❌ Reject",
-
+          text: "❌ Reject",
           callback_data:
-            `approval:${approvalId}:rejected`,
-        },
-      ],
-    ],
+            `approval:${approvalId}:rejected`
+        }
+      ]
+    ]
   };
 }
 
@@ -64,29 +52,21 @@ export function createApprovalController(
   env
 ) {
   const store =
-    createPersistentStore(
-      env
-    );
+    createPersistentStore(env);
 
   const telegram =
-    createTelegramClient(
-      env
-    );
+    createTelegramClient(env);
 
   async function requestApproval({
     taskId,
-
     action,
-
     requestedBy,
-
     payload = {},
-
     chatId =
       env.FOUNDER_CHAT_ID,
-
     botToken =
-      env.TELEGRAM_BOT_TOKEN,
+      env.TELEGRAM_APPROVAL_BOT_TOKEN ??
+      env.OPS_BOT_TOKEN
   } = {}) {
     if (!taskId) {
       throw new Error(
@@ -108,13 +88,13 @@ export function createApprovalController(
 
     if (!chatId) {
       throw new Error(
-        "chatId is required"
+        "FOUNDER_CHAT_ID is required"
       );
     }
 
     if (!botToken) {
       throw new Error(
-        "botToken is required"
+        "An approval Telegram bot token is required"
       );
     }
 
@@ -123,39 +103,33 @@ export function createApprovalController(
         taskId,
         action,
         requestedBy,
-        payload,
+        payload
       });
 
-    const message =
-      [
-        "<b>🔐 FOUNDER APPROVAL REQUIRED</b>",
-        "",
-        `<b>Action:</b> ${escapeHtml(
-          action
-        )}`,
-        `<b>Agent:</b> ${escapeHtml(
-          requestedBy
-        )}`,
-        `<b>Task:</b> <code>${escapeHtml(
-          taskId
-        )}</code>`,
-        "",
-        "This action is waiting for founder approval.",
-      ].join("\n");
+    const message = [
+      "<b>🔐 FOUNDER APPROVAL REQUIRED</b>",
+      "",
+      `<b>Action:</b> ${escapeHtml(
+        action
+      )}`,
+      `<b>Agent:</b> ${escapeHtml(
+        requestedBy
+      )}`,
+      `<b>Task:</b> <code>${escapeHtml(
+        taskId
+      )}</code>`,
+      "",
+      "This action is waiting for founder approval."
+    ].join("\n");
 
     await telegram.sendMessage({
-      token:
-        botToken,
-
+      token: botToken,
       chatId,
-
-      text:
-        message,
-
+      text: message,
       replyMarkup:
         createKeyboard(
           approval.id
-        ),
+        )
     });
 
     return approval;
@@ -173,7 +147,7 @@ export function createApprovalController(
         "string"
     ) {
       return {
-        handled: false,
+        handled: false
       };
     }
 
@@ -183,7 +157,7 @@ export function createApprovalController(
       )
     ) {
       return {
-        handled: false,
+        handled: false
       };
     }
 
@@ -200,48 +174,46 @@ export function createApprovalController(
       !approvalId ||
       ![
         "approved",
-        "rejected",
+        "rejected"
       ].includes(
         decision
       )
     ) {
       return {
-        handled: false,
+        handled: false
       };
     }
 
     const founderId =
       String(
-        env.FOUNDER_TELEGRAM_ID ||
+        env.FOUNDER_TELEGRAM_ID ??
           ""
       );
 
     const actorId =
       String(
-        callback.from?.id ||
+        callback.from?.id ??
           ""
       );
 
-    // Critical security check:
-    // only the configured founder can
-    // approve/reject production actions.
     if (
       !founderId ||
-      actorId !== founderId
+      actorId !==
+        founderId
     ) {
-      await telegram.answerCallbackQuery({
-        callbackQueryId:
-          callback.id,
-
-        text:
-          "⛔ You are not authorized to approve this action.",
-
-        showAlert: true,
-      });
+      await telegram.answerCallbackQuery(
+        {
+          callbackQueryId:
+            callback.id,
+          text:
+            "⛔ You are not authorized to approve this action.",
+          showAlert: true
+        }
+      );
 
       return {
         handled: true,
-        authorized: false,
+        authorized: false
       };
     }
 
@@ -257,27 +229,24 @@ export function createApprovalController(
         actor
       );
 
-    await telegram.answerCallbackQuery({
-      callbackQueryId:
-        callback.id,
-
-      text:
-        approval?.status ===
-        decision
-          ? `Approval ${decision}`
-          : "Approval was already resolved.",
-    });
+    await telegram.answerCallbackQuery(
+      {
+        callbackQueryId:
+          callback.id,
+        text:
+          approval?.status ===
+          decision
+            ? `Approval ${decision}`
+            : "Approval was already resolved."
+      }
+    );
 
     return {
       handled: true,
-
       authorized: true,
-
       approval,
-
       decision,
-
-      actor,
+      actor
     };
   }
 
@@ -292,6 +261,6 @@ export function createApprovalController(
   return {
     requestApproval,
     handleCallback,
-    getPending,
+    getPending
   };
 }
