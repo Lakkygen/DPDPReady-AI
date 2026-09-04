@@ -1,17 +1,6 @@
-// src/telegram/router.js
-
-import {
-  getBotConfigs
-} from "./bots.js";
-
-import {
-  isAllowedGroup
-} from "./group.js";
-
-import {
-  parseCommand
-} from "./commands.js";
-
+import { getBotConfigs } from "./bots.js";
+import { isAllowedGroup } from "./group.js";
+import { parseCommand } from "./commands.js";
 import {
   formatAgentMessage,
   truncateTelegramText
@@ -26,31 +15,23 @@ function extractMessage(update) {
 }
 
 function extractText(update) {
-  const message =
-    extractMessage(update);
-
   return String(
-    message?.text ?? ""
+    extractMessage(update)
+      ?.text ?? ""
   ).trim();
 }
 
 function getChatId(update) {
-  const message =
-    extractMessage(update);
-
   return (
-    message?.chat?.id ??
-    null
+    extractMessage(update)
+      ?.chat?.id ?? null
   );
 }
 
 function getMessageId(update) {
-  const message =
-    extractMessage(update);
-
   return (
-    message?.message_id ??
-    null
+    extractMessage(update)
+      ?.message_id ?? null
   );
 }
 
@@ -74,20 +55,24 @@ async function telegramRequest(
           "Content-Type":
             "application/json"
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(
+          body
+        )
       }
     );
 
   const responseText =
     await response.text();
 
-  let payload = null;
+  let payload;
 
   try {
     payload =
-      JSON.parse(
-        responseText
-      );
+      responseText
+        ? JSON.parse(
+            responseText
+          )
+        : null;
   } catch {
     payload = {
       ok: response.ok,
@@ -95,18 +80,12 @@ async function telegramRequest(
     };
   }
 
-  if (!response.ok) {
-    throw new Error(
-      `Telegram ${method} failed: ${response.status}`
-    );
-  }
-
   if (
-    payload &&
-    payload.ok === false
+    !response.ok ||
+    payload?.ok === false
   ) {
     throw new Error(
-      `Telegram ${method} failed.`
+      `Telegram ${method} failed: ${response.status}`
     );
   }
 
@@ -124,9 +103,10 @@ async function sendMessage({
     "sendMessage",
     {
       chat_id: chatId,
-      text: truncateTelegramText(
-        text
-      ),
+      text:
+        truncateTelegramText(
+          text
+        ),
       reply_to_message_id:
         replyToMessageId ??
         undefined,
@@ -136,15 +116,6 @@ async function sendMessage({
   );
 }
 
-/**
- * Match a bot by its display name.
- *
- * Example:
- *   "Marcus check production"
- *
- * This intentionally preserves the repo's
- * current name-based direct-agent behaviour.
- */
 function findMentionedAgent(
   text,
   botConfigs
@@ -153,25 +124,23 @@ function findMentionedAgent(
     String(text ?? "")
       .toLowerCase();
 
-  for (
-    const bot of botConfigs
-  ) {
-    const name =
-      String(
-        bot.name ?? ""
-      )
-        .toLowerCase()
-        .trim();
+  return (
+    botConfigs.find(
+      (bot) => {
+        const name =
+          String(
+            bot.name ?? ""
+          )
+            .toLowerCase()
+            .trim();
 
-    if (
-      name &&
-      lower.includes(name)
-    ) {
-      return bot;
-    }
-  }
-
-  return null;
+        return (
+          name &&
+          lower.includes(name)
+        );
+      }
+    ) ?? null
+  );
 }
 
 function removeBotName(
@@ -179,8 +148,9 @@ function removeBotName(
   botName
 ) {
   if (!botName) {
-    return String(text ?? "")
-      .trim();
+    return String(
+      text ?? ""
+    ).trim();
   }
 
   return String(text ?? "")
@@ -223,8 +193,25 @@ export async function routeTelegramUpdate(
   env,
   orchestrator,
   runtime,
-  teamCoordinator = null
+  teamCoordinator = null,
+  approvalController = null
 ) {
+  if (
+    update?.callback_query
+  ) {
+    if (!approvalController) {
+      return {
+        handled: false,
+        reason:
+          "approval_controller_unavailable"
+      };
+    }
+
+    return approvalController.handleCallback(
+      update
+    );
+  }
+
   const chatId =
     getChatId(update);
 
@@ -261,13 +248,6 @@ export async function routeTelegramUpdate(
   const command =
     parseCommand(text);
 
-  /*
-   * Direct agent mode:
-   *
-   * /ops check production
-   * /research check latest DPDP update
-   * Marcus check production
-   */
   let targetBot =
     findMentionedAgent(
       text,
@@ -282,13 +262,6 @@ export async function routeTelegramUpdate(
       );
   }
 
-  /*
-   * NEW:
-   *
-   * If the founder doesn't explicitly target
-   * one bot, the message becomes a team
-   * conversation.
-   */
   if (!targetBot) {
     if (!teamCoordinator) {
       return {
@@ -298,15 +271,17 @@ export async function routeTelegramUpdate(
       };
     }
 
-    return teamCoordinator.run({
-      chatId,
-      message: text,
-      replyToMessageId:
-        messageId,
-      triggerAgentId:
-        null,
-      incident: false
-    });
+    return teamCoordinator.run(
+      {
+        chatId,
+        message: text,
+        replyToMessageId:
+          messageId,
+        triggerAgentId:
+          null,
+        incident: false
+      }
+    );
   }
 
   const agent =
@@ -322,24 +297,15 @@ export async function routeTelegramUpdate(
     };
   }
 
-  let taskText = text;
-
-  if (command) {
-    taskText =
-      command.args.join(
-        " "
-      ).trim();
-  } else {
-    taskText =
-      removeBotName(
+  const taskText = command
+    ? command.args
+        .join(" ")
+        .trim()
+    : removeBotName(
         text,
         targetBot.name
       );
-  }
 
-  /*
-   * Direct mention with no task.
-   */
   if (!taskText) {
     await sendMessage({
       token:
@@ -357,50 +323,41 @@ export async function routeTelegramUpdate(
     return {
       handled: true,
       mode: "direct",
-      agent:
-        agent.id
+      agent: agent.id
     };
   }
 
   const task =
-    orchestrator.createTask({
-      title:
-        taskText.slice(
-          0,
-          200
-        ),
-
-      description:
-        taskText,
-
-      assignedTo:
-        agent.id,
-
-      createdBy:
-        "founder",
-
-      priority:
-        "normal",
-
-      metadata: {
-        source:
-          "telegram",
-
-        chatId,
-
-        messageId,
-
-        directAgent:
-          true
+    await orchestrator.createTask(
+      {
+        title:
+          taskText.slice(
+            0,
+            200
+          ),
+        description:
+          taskText,
+        assignedTo:
+          agent.id,
+        createdBy:
+          "founder",
+        priority:
+          "normal",
+        metadata: {
+          source:
+            "telegram",
+          chatId,
+          messageId,
+          directAgent:
+            true
+        }
       }
-    });
+    );
 
   const result =
     await orchestrator.executeTask(
       task,
-      {
-        runtime
-      }
+      { runtime }
     );
 
   const response =
@@ -424,9 +381,7 @@ export async function routeTelegramUpdate(
   return {
     handled: true,
     mode: "direct",
-    agent:
-      agent.id,
-    taskId:
-      task.id
+    agent: agent.id,
+    taskId: task.id
   };
 }
