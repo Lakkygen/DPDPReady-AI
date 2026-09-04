@@ -1,8 +1,4 @@
-// src/security/approvalGate.js
-
-function normalizeToken(
-  token
-) {
+function normalizeToken(token) {
   if (
     token === null ||
     token === undefined
@@ -13,10 +9,7 @@ function normalizeToken(
   if (
     typeof token === "string"
   ) {
-    const trimmed =
-      token.trim();
-
-    return trimmed || null;
+    return token.trim() || null;
   }
 
   if (
@@ -32,9 +25,7 @@ function normalizeToken(
   return null;
 }
 
-function parsePayloadJson(
-  value
-) {
+function parseJson(value) {
   if (!value) {
     return {};
   }
@@ -75,7 +66,7 @@ export function createApprovalGate(
     Math.max(
       Number(
         options.approvalTtlMs ??
-        15 * 60 * 1000
+          15 * 60 * 1000
       ),
       60 * 1000
     );
@@ -84,7 +75,7 @@ export function createApprovalGate(
     approvalToken,
     agent,
     toolName,
-    taskId = null,
+    taskId = null
   } = {}) {
     const token =
       normalizeToken(
@@ -95,14 +86,12 @@ export function createApprovalGate(
       return {
         valid: false,
         reason:
-          "Approval token is missing.",
+          "Approval token is missing."
       };
     }
 
     if (
-      controller &&
-      typeof controller.isApprovalValid ===
-        "function"
+      controller?.isApprovalValid
     ) {
       try {
         const valid =
@@ -111,7 +100,7 @@ export function createApprovalGate(
             {
               agent,
               toolName,
-              taskId,
+              taskId
             }
           );
 
@@ -119,7 +108,7 @@ export function createApprovalGate(
           valid: Boolean(valid),
           reason: valid
             ? null
-            : "Approval controller rejected the approval.",
+            : "Approval controller rejected the approval."
         };
       } catch (error) {
         logger.error?.(
@@ -130,20 +119,18 @@ export function createApprovalGate(
         return {
           valid: false,
           reason:
-            "Approval validation failed.",
+            "Approval validation failed."
         };
       }
     }
 
     if (
-      !store ||
-      typeof store.getApproval !==
-        "function"
+      !store?.getApproval
     ) {
       return {
         valid: false,
         reason:
-          "No persistent approval validator is configured.",
+          "No persistent approval validator is configured."
       };
     }
 
@@ -156,7 +143,7 @@ export function createApprovalGate(
       return {
         valid: false,
         reason:
-          "Approval not found.",
+          "Approval not found."
       };
     }
 
@@ -168,13 +155,11 @@ export function createApprovalGate(
         valid: false,
         approval,
         reason:
-          `Approval status is ${approval.status}.`,
+          `Approval status is ${approval.status}.`
       };
     }
 
-    if (
-      approval.created_at
-    ) {
+    if (approval.created_at) {
       const createdAt =
         Date.parse(
           approval.created_at
@@ -192,23 +177,32 @@ export function createApprovalGate(
           valid: false,
           approval,
           reason:
-            "Approval has expired.",
+            "Approval has expired."
         };
       }
     }
 
+    const metadata =
+      parseJson(
+        approval.metadata
+      );
+
+    const storedTaskId =
+      approval.task_id ??
+      metadata.taskId ??
+      null;
+
     if (
       taskId &&
-      approval.task_id &&
-      String(
-        approval.task_id
-      ) !== String(taskId)
+      storedTaskId &&
+      String(storedTaskId) !==
+        String(taskId)
     ) {
       return {
         valid: false,
         approval,
         reason:
-          "Approval does not belong to this task.",
+          "Approval does not belong to this task."
       };
     }
 
@@ -217,13 +211,14 @@ export function createApprovalGate(
       approval.action &&
       String(
         approval.action
-      ) !== String(toolName)
+      ) !==
+        String(toolName)
     ) {
       return {
         valid: false,
         approval,
         reason:
-          "Approval does not authorize this tool.",
+          "Approval does not authorize this tool."
       };
     }
 
@@ -232,40 +227,46 @@ export function createApprovalGate(
       approval.requested_by &&
       String(
         approval.requested_by
-      ) !== String(agent.id)
+      ) !==
+        String(agent.id)
     ) {
       return {
         valid: false,
         approval,
         reason:
-          "Approval does not belong to this agent.",
+          "Approval does not belong to this agent."
       };
     }
 
-    const storedPayload =
-      parsePayloadJson(
-        approval.payload_json
+    const payload =
+      parseJson(
+        approval.payload_json ??
+          metadata.payload
       );
 
+    const approvedAgentId =
+      payload.agentId ?? null;
+
     if (
-      storedPayload.agentId &&
+      approvedAgentId &&
       agent?.id &&
       String(
-        storedPayload.agentId
-      ) !== String(agent.id)
+        approvedAgentId
+      ) !==
+        String(agent.id)
     ) {
       return {
         valid: false,
         approval,
         reason:
-          "Approval agent binding failed.",
+          "Approval agent binding failed."
       };
     }
 
     return {
       valid: true,
       approval,
-      reason: null,
+      reason: null
     };
   }
 
@@ -273,39 +274,42 @@ export function createApprovalGate(
     taskId,
     toolName,
     agent,
-    payload = {},
+    payload = {}
   } = {}) {
     if (
-      controller &&
-      typeof controller.requestApproval ===
-        "function"
+      controller?.requestApproval
     ) {
-      return controller.requestApproval({
-        taskId,
-        action: toolName,
-        requestedBy:
-          agent?.id ?? "unknown",
-        payload,
-      });
+      return controller.requestApproval(
+        {
+          taskId,
+          action: toolName,
+          requestedBy:
+            agent?.id ??
+            "unknown",
+          payload
+        }
+      );
     }
 
     if (
-      store &&
-      typeof store.createApproval ===
-        "function"
+      store?.createApproval
     ) {
-      return store.createApproval({
-        taskId,
-        action: toolName,
-        requestedBy:
-          agent?.id ?? "unknown",
-        payload: {
-          ...payload,
-          agentId:
-            agent?.id ?? null,
-          toolName,
-        },
-      });
+      return store.createApproval(
+        {
+          taskId,
+          action: toolName,
+          requestedBy:
+            agent?.id ??
+            "unknown",
+          payload: {
+            ...payload,
+            agentId:
+              agent?.id ??
+              null,
+            toolName
+          }
+        }
+      );
     }
 
     throw new Error(
@@ -315,6 +319,6 @@ export function createApprovalGate(
 
   return {
     validate,
-    request,
+    request
   };
 }
