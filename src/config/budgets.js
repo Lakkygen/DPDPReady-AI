@@ -3,8 +3,8 @@
 /**
  * DPDPReady AI — Agent Resource Budgets
  *
- * These values limit how much reasoning an agent may perform
- * during a single task.
+ * These values limit how much reasoning and
+ * tool usage an agent may perform during one task.
  */
 
 export const DEFAULT_BUDGET = {
@@ -51,19 +51,25 @@ export const AGENT_BUDGETS = {
   }
 };
 
-export function getAgentBudget(agentId) {
+export function getAgentBudget(
+  agentId
+) {
+  const custom =
+    AGENT_BUDGETS[
+      agentId
+    ] ?? {};
+
   return {
     ...DEFAULT_BUDGET,
-    ...(AGENT_BUDGETS[agentId] ?? {})
+    ...custom
   };
 }
 
 /**
- * Optional global safety limit.
+ * Global safety limits.
  *
- * This is deliberately separate from provider billing.
- * It prevents a runaway workflow from making thousands
- * of calls even if the provider itself allows them.
+ * These are execution guards and are separate
+ * from provider billing.
  */
 export const GLOBAL_LIMITS = {
   maxTasksPerMinute: 20,
