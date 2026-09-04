@@ -1,30 +1,15 @@
-// src/team/coordinator.js
-
-import {
-  getBotConfigs
-} from "../telegram/bots.js";
-
+import { getBotConfigs } from "../telegram/bots.js";
 import {
   formatAgentMessage,
   truncateTelegramText
 } from "../telegram/formatting.js";
-
-import {
-  selectParticipants
-} from "./participantSelector.js";
-
+import { selectParticipants } from "./participantSelector.js";
 import {
   createConversationGuard,
   stripSilentPrefix
 } from "./guards.js";
-
-import {
-  TeamConversation
-} from "./conversation.js";
-
-import {
-  TeamMemory
-} from "./memory.js";
+import { TeamConversation } from "./conversation.js";
+import { TeamMemory } from "./memory.js";
 
 async function sendTelegramMessage({
   token,
@@ -49,9 +34,10 @@ async function sendTelegramMessage({
         },
         body: JSON.stringify({
           chat_id: chatId,
-          text: truncateTelegramText(
-            text
-          ),
+          text:
+            truncateTelegramText(
+              text
+            ),
           reply_to_message_id:
             replyToMessageId ??
             undefined
@@ -81,10 +67,10 @@ function buildTask({
 }) {
   return [
     `You are ${agent.name}.`,
-    `You are participating in a live DPDPReady multi-agent team conversation.`,
+    "You are participating in a live DPDPReady multi-agent team conversation.",
     "",
     "YOUR ROLE:",
-    `${agent.title}`,
+    agent.title,
     "",
     "ORIGINAL REQUEST / INCIDENT:",
     originalMessage,
@@ -98,7 +84,11 @@ function buildTask({
       "No previous team memory.",
     "",
     `ROUND: ${round}`,
-    `INCIDENT: ${incident ? "yes" : "no"}`,
+    `INCIDENT: ${
+      incident
+        ? "yes"
+        : "no"
+    }`,
     "",
     "TEAM BEHAVIOUR:",
     "- Speak only when you can add useful information.",
@@ -110,17 +100,20 @@ function buildTask({
     "- Never invent tool results.",
     "- Never claim an action happened unless it actually happened.",
     "- Do not perform risky operations simply because another agent suggested them.",
-    "- If you genuinely have nothing useful to add, output exactly SILENT.",
+    '- If you genuinely have nothing useful to add, output exactly SILENT.',
     "",
     "Your response will be posted into the Telegram group as your bot identity.",
     "Keep the response conversational."
   ].join("\n");
 }
 
-function isCompletionMessage(content) {
+function isCompletionMessage(
+  content
+) {
   const lower =
-    String(content ?? "")
-      .toLowerCase();
+    String(
+      content ?? ""
+    ).toLowerCase();
 
   return [
     "issue resolved",
@@ -130,7 +123,9 @@ function isCompletionMessage(content) {
     "no further action needed",
     "resolved and verified"
   ].some((phrase) =>
-    lower.includes(phrase)
+    lower.includes(
+      phrase
+    )
   );
 }
 
@@ -184,10 +179,12 @@ export class TeamCoordinator {
 
     const botMap =
       new Map(
-        bots.map((bot) => [
-          bot.agentId,
-          bot
-        ])
+        bots.map(
+          (bot) => [
+            bot.agentId,
+            bot
+          ]
+        )
       );
 
     const participants =
@@ -210,10 +207,12 @@ export class TeamCoordinator {
       });
 
     const persistentMemories =
-      await this.teamMemory.load({
-        chatId,
-        limit: 10
-      });
+      await this.teamMemory.load(
+        {
+          chatId,
+          limit: 10
+        }
+      );
 
     const persistentMemory =
       this.teamMemory.format(
@@ -246,20 +245,23 @@ export class TeamCoordinator {
       round <= 4;
       round += 1
     ) {
-      if (!guard.canContinue()) {
+      if (
+        !guard.canContinue()
+      ) {
         break;
       }
 
       guard.startRound();
 
-      let contributions =
-        0;
+      let contributions = 0;
 
       for (
         const agentId of
-          orderedParticipants
+        orderedParticipants
       ) {
-        if (!guard.canContinue()) {
+        if (
+          !guard.canContinue()
+        ) {
           break;
         }
 
@@ -269,7 +271,9 @@ export class TeamCoordinator {
           );
 
         const bot =
-          botMap.get(agentId);
+          botMap.get(
+            agentId
+          );
 
         if (
           !agent ||
@@ -278,74 +282,74 @@ export class TeamCoordinator {
           continue;
         }
 
-        const task =
-          this.orchestrator.createTask({
-            title:
-              `Team discussion: ${originalMessage.slice(
-                0,
-                120
-              )}`,
-            description:
-              buildTask({
-                agent,
-                originalMessage,
-                teamTranscript:
-                  conversation.getTranscript(
-                    12
-                  ),
-                persistentMemory,
-                round,
-                incident
-              }),
-            assignedTo:
-              agent.id,
-            createdBy:
-              "team",
-            priority:
-              incident
-                ? "high"
-                : "normal",
-            metadata: {
-              source:
-                "telegram_team",
-              chatId,
-              teamConversation:
-                true,
-              teamRound:
-                round,
-              teamParticipants:
-                participants,
-              triggerAgentId:
-                triggerAgentId ??
-                null,
-              incident
-            }
-          });
-
         try {
-          const result =
-            await this.orchestrator
-              .executeTask(
-                task,
-                {
-                  runtime:
-                    this.runtime,
-                  context: {
-                    teamConversation:
-                      true,
-                    teamRound:
-                      round,
-                    teamParticipants:
-                      participants,
-                    teamMemory:
-                      persistentMemory,
+          const task =
+            await this.orchestrator.createTask(
+              {
+                title:
+                  `Team discussion: ${originalMessage.slice(
+                    0,
+                    120
+                  )}`,
+                description:
+                  buildTask({
+                    agent,
+                    originalMessage,
                     teamTranscript:
                       conversation.getTranscript(
                         12
-                      )
-                  }
+                      ),
+                    persistentMemory,
+                    round,
+                    incident
+                  }),
+                assignedTo:
+                  agent.id,
+                createdBy: "team",
+                priority:
+                  incident
+                    ? "high"
+                    : "normal",
+                metadata: {
+                  source:
+                    "telegram_team",
+                  chatId,
+                  teamConversation:
+                    true,
+                  teamRound:
+                    round,
+                  teamParticipants:
+                    participants,
+                  triggerAgentId:
+                    triggerAgentId ??
+                    null,
+                  incident
                 }
-              );
+              }
+            );
+
+          const result =
+            await this.orchestrator.executeTask(
+              task,
+              {
+                runtime:
+                  this.runtime,
+                context: {
+                  teamConversation:
+                    true,
+                  teamRound:
+                    round,
+                  teamParticipants:
+                    participants,
+                  teamMemory:
+                    persistentMemory,
+                  teamTranscript:
+                    conversation.getTranscript(
+                      12
+                    )
+                }
+              }
+            );
 
           const raw =
             result?.result
@@ -370,39 +374,42 @@ export class TeamCoordinator {
 
           contributions += 1;
 
-          conversation.addMessage({
-            agentId:
-              agent.id,
-            agentName:
-              agent.name,
-            content,
-            type: "agent",
-            round
-          });
+          conversation.addMessage(
+            {
+              agentId:
+                agent.id,
+              agentName:
+                agent.name,
+              content,
+              type: "agent",
+              round
+            }
+          );
 
-          guard.recordMessage({
-            agentId:
-              agent.id,
-            content
-          });
+          guard.recordMessage(
+            {
+              agentId:
+                agent.id,
+              content
+            }
+          );
 
-          await sendTelegramMessage({
-            token:
-              bot.token,
-            chatId,
-            text:
-              formatAgentMessage(
-                agent,
-                content
-              ),
-            replyToMessageId
-          });
+          await sendTelegramMessage(
+            {
+              token:
+                bot.token,
+              chatId,
+              text:
+                formatAgentMessage(
+                  agent,
+                  content
+                ),
+              replyToMessageId
+            }
+          );
 
-          /*
-           * Persist meaningful findings.
-           */
-          await this.teamMemory
-            .saveFinding({
+          await this.teamMemory.saveFinding(
+            {
               chatId,
               agentId:
                 agent.id,
@@ -416,21 +423,25 @@ export class TeamCoordinator {
               finding:
                 content,
               importance:
-                incident ? 4 : 3
-            });
+                incident
+                  ? 4
+                  : 3
+            }
+          );
 
           if (
             isCompletionMessage(
               content
             )
           ) {
-            await this.teamMemory
-              .saveDecision({
+            await this.teamMemory.saveDecision(
+              {
                 chatId,
                 decision:
                   content,
                 importance: 5
-              });
+              }
+            );
 
             guard.markFinished();
             break;
@@ -443,7 +454,9 @@ export class TeamCoordinator {
         }
       }
 
-      if (contributions === 0) {
+      if (
+        contributions === 0
+      ) {
         break;
       }
     }
