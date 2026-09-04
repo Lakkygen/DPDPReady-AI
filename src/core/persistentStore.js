@@ -1,101 +1,187 @@
-import {
-  createDatabase,
-} from "../tools/database.js";
+import { createDatabase } from "../tools/database.js";
 
 function json(value) {
-  return JSON.stringify(
-    value ?? {}
-  );
+  return JSON.stringify(value ?? {});
 }
 
-export function createPersistentStore(
-  env
+function parseJson(
+  value,
+  fallback = {}
 ) {
+  if (
+    value &&
+    typeof value === "object"
+  ) {
+    return value;
+  }
+
+  if (!value) {
+    return fallback;
+  }
+
+  try {
+    const parsed =
+      JSON.parse(value);
+
+    return parsed &&
+      typeof parsed === "object"
+      ? parsed
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeTask(row) {
+  if (!row) {
+    return null;
+  }
+
+  const payload =
+    parseJson(
+      row.metadata,
+      {}
+    );
+
+  const result =
+    parseJson(
+      row.result,
+      null
+    );
+
+  return {
+    ...row,
+    assignedAgent:
+      row.assigned_to ?? null,
+    assignedTo:
+      row.assigned_to ?? null,
+    assigned_agent:
+      row.assigned_to ?? null,
+    payload,
+    payload_json:
+      row.metadata ?? "{}",
+    result_json:
+      row.result ?? null,
+    error_text:
+      row.error ?? null,
+    result
+  };
+}
+
+function normalizeEvent(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    ...row,
+    type: row.event_type,
+    source: row.actor,
+    payload_json:
+      row.payload,
+    payload: parseJson(
+      row.payload,
+      {}
+    )
+  };
+}
+
+function normalizeApproval(row) {
+  if (!row) {
+    return null;
+  }
+
+  const metadata =
+    parseJson(
+      row.metadata,
+      {}
+    );
+
+  return {
+    ...row,
+    task_id:
+      metadata.taskId ?? null,
+    payload_json:
+      row.metadata ?? "{}",
+    created_at:
+      row.created_at,
+    resolved_at:
+      row.resolved_at ?? null
+  };
+}
+
+export function createPersistentStore(env) {
   const database =
     createDatabase(env);
 
-  async function createTask(
-    task
-  ) {
+  async function createTask(task) {
+    const assignedTo =
+      task.assignedAgent ??
+      task.assignedTo ??
+      null;
+
+    if (!assignedTo) {
+      throw new Error(
+        "assignedAgent is required when creating a task."
+      );
+    }
+
     const id =
       task.id ||
       crypto.randomUUID();
+
+    const metadata = {
+      ...(task.metadata ?? {}),
+      ...(task.payload ?? {})
+    };
 
     await database.execute(
       `
       INSERT INTO tasks (
         id,
-        type,
         title,
         description,
-        status,
-        priority,
-        assigned_agent,
+        assigned_to,
         created_by,
-        payload_json,
-        created_at,
-        updated_at
+        priority,
+        status,
+        metadata,
+        result,
+        error,
+        created_at
       )
-      VALUES (
-        ?,
-        ?,
-        ?,
-        ?,
-        'queued',
-        ?,
-        ?,
-        ?,
-        ?,
-        datetime('now'),
-        datetime('now')
-      )
+      VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, NULL, NULL, datetime('now'))
       `,
-
       id,
-
-      task.type ||
-        "general",
-
       task.title ||
         "Untitled task",
-
       task.description ||
         "",
-
-      task.priority ||
-        "normal",
-
-      task.assignedAgent ||
-        null,
-
+      assignedTo,
       task.createdBy ||
         "system",
-
-      json(
-        task.payload
-      )
+      task.priority ||
+        "normal",
+      json(metadata)
     );
 
     return getTask(id);
   }
 
-  async function getTask(
-    id
-  ) {
+  async function getTask(id) {
     if (!id) {
       throw new Error(
         "task id is required"
       );
     }
 
-    return database.first(
-      `
-      SELECT *
-      FROM tasks
-      WHERE id = ?
-      `,
-      id
-    );
+    const row =
+      await database.first(
+        `SELECT * FROM tasks WHERE id = ?`,
+        id
+      );
+
+    return normalizeTask(row);
   }
 
   async function updateTask(
@@ -111,52 +197,78 @@ export function createPersistentStore(
     const fields = [];
     const values = [];
 
-    const updates = {
-      status:
-        patch.status,
-
-      assigned_agent:
-        patch.assignedAgent,
-
-      result_json:
-        patch.result === undefined
-          ? undefined
-          : json(
-              patch.result
-            ),
-
-      error_text:
-        patch.errorText,
-
-      started_at:
-        patch.startedAt,
-
-      completed_at:
-        patch.completedAt,
-
-      updated_at:
-        new Date().toISOString(),
-    };
-
-    for (
-      const [
-        column,
-        value,
-      ] of Object.entries(
-        updates
-      )
+    if (
+      patch.status !==
+      undefined
     ) {
-      if (
-        value !== undefined
-      ) {
-        fields.push(
-          `${column} = ?`
-        );
+      fields.push(
+        "status = ?"
+      );
+      values.push(
+        patch.status
+      );
+    }
 
-        values.push(
-          value
-        );
-      }
+    if (
+      patch.assignedAgent !==
+      undefined
+    ) {
+      fields.push(
+        "assigned_to = ?"
+      );
+      values.push(
+        patch.assignedAgent
+      );
+    }
+
+    if (
+      patch.result !==
+      undefined
+    ) {
+      fields.push(
+        "result = ?"
+      );
+      values.push(
+        json(patch.result)
+      );
+    }
+
+    if (
+      patch.errorText !==
+      undefined
+    ) {
+      fields.push(
+        "error = ?"
+      );
+      values.push(
+        String(
+          patch.errorText
+        )
+      );
+    }
+
+    if (
+      patch.startedAt !==
+      undefined
+    ) {
+      fields.push(
+        "started_at = ?"
+      );
+      values.push(
+        patch.startedAt
+      );
+    }
+
+    if (
+      patch.completedAt !==
+      undefined
+    ) {
+      fields.push(
+        "completed_at = ?"
+      );
+      values.push(
+        patch.completedAt
+      );
     }
 
     if (!fields.length) {
@@ -166,11 +278,9 @@ export function createPersistentStore(
     values.push(id);
 
     await database.execute(
-      `
-      UPDATE tasks
-      SET ${fields.join(", ")}
-      WHERE id = ?
-      `,
+      `UPDATE tasks SET ${fields.join(
+        ", "
+      )} WHERE id = ?`,
       ...values
     );
 
@@ -180,7 +290,7 @@ export function createPersistentStore(
   async function listTasks({
     status,
     agent,
-    limit = 50,
+    limit = 50
   } = {}) {
     const conditions = [];
     const params = [];
@@ -189,20 +299,14 @@ export function createPersistentStore(
       conditions.push(
         "status = ?"
       );
-
-      params.push(
-        status
-      );
+      params.push(status);
     }
 
     if (agent) {
       conditions.push(
-        "assigned_agent = ?"
+        "assigned_to = ?"
       );
-
-      params.push(
-        agent
-      );
+      params.push(agent);
     }
 
     const safeLimit =
@@ -225,21 +329,18 @@ export function createPersistentStore(
           )}`
         : "";
 
-    return database.all(
-      `
-      SELECT *
-      FROM tasks
-      ${where}
-      ORDER BY created_at DESC
-      LIMIT ?
-      `,
-      ...params
+    const rows =
+      await database.all(
+        `SELECT * FROM tasks ${where} ORDER BY created_at DESC LIMIT ?`,
+        ...params
+      );
+
+    return rows.map(
+      normalizeTask
     );
   }
 
-  async function appendEvent(
-    event
-  ) {
+  async function appendEvent(event) {
     const id =
       event.id ||
       crypto.randomUUID();
@@ -248,45 +349,31 @@ export function createPersistentStore(
       `
       INSERT INTO events (
         id,
-        type,
-        source,
-        payload_json,
+        event_type,
+        actor,
+        payload,
         created_at
       )
-      VALUES (
-        ?,
-        ?,
-        ?,
-        ?,
-        datetime('now')
-      )
+      VALUES (?, ?, ?, ?, datetime('now'))
       `,
-
       id,
-
       event.type,
-
       event.source ||
         "system",
-
-      json(
-        event.payload
-      )
+      json(event.payload)
     );
 
-    return database.first(
-      `
-      SELECT *
-      FROM events
-      WHERE id = ?
-      `,
-      id
+    return normalizeEvent(
+      await database.first(
+        `SELECT * FROM events WHERE id = ?`,
+        id
+      )
     );
   }
 
   async function recentEvents({
     type,
-    limit = 50,
+    limit = 50
   } = {}) {
     const safeLimit =
       Math.min(
@@ -297,28 +384,19 @@ export function createPersistentStore(
         200
       );
 
-    if (type) {
-      return database.all(
-        `
-        SELECT *
-        FROM events
-        WHERE type = ?
-        ORDER BY created_at DESC
-        LIMIT ?
-        `,
-        type,
-        safeLimit
-      );
-    }
+    const rows = type
+      ? await database.all(
+          `SELECT * FROM events WHERE event_type = ? ORDER BY created_at DESC LIMIT ?`,
+          type,
+          safeLimit
+        )
+      : await database.all(
+          `SELECT * FROM events ORDER BY created_at DESC LIMIT ?`,
+          safeLimit
+        );
 
-    return database.all(
-      `
-      SELECT *
-      FROM events
-      ORDER BY created_at DESC
-      LIMIT ?
-      `,
-      safeLimit
+    return rows.map(
+      normalizeEvent
     );
   }
 
@@ -341,70 +419,53 @@ export function createPersistentStore(
       );
     }
 
+    const metadata = {
+      ...(approval.metadata ?? {}),
+      taskId:
+        approval.taskId,
+      payload:
+        approval.payload ?? {}
+    };
+
     await database.execute(
       `
       INSERT INTO approvals (
         id,
-        task_id,
-        action,
         requested_by,
+        action,
+        description,
+        metadata,
         status,
-        payload_json,
+        resolved_by,
         created_at,
-        updated_at
+        resolved_at
       )
-      VALUES (
-        ?,
-        ?,
-        ?,
-        ?,
-        'pending',
-        ?,
-        datetime('now'),
-        datetime('now')
-      )
+      VALUES (?, ?, ?, ?, ?, 'pending', NULL, datetime('now'), NULL)
       `,
-
       id,
-
-      approval.taskId,
-
-      approval.action,
-
       approval.requestedBy ||
         "agent",
-
-      json(
-        approval.payload
-      )
+      approval.action,
+      approval.description ||
+        "",
+      json(metadata)
     );
 
-    return database.first(
-      `
-      SELECT *
-      FROM approvals
-      WHERE id = ?
-      `,
-      id
-    );
+    return getApproval(id);
   }
 
-  async function getApproval(
-    id
-  ) {
+  async function getApproval(id) {
     if (!id) {
       throw new Error(
         "approval id is required"
       );
     }
 
-    return database.first(
-      `
-      SELECT *
-      FROM approvals
-      WHERE id = ?
-      `,
-      id
+    return normalizeApproval(
+      await database.first(
+        `SELECT * FROM approvals WHERE id = ?`,
+        id
+      )
     );
   }
 
@@ -418,7 +479,7 @@ export function createPersistentStore(
         "approved",
         "rejected",
         "expired",
-        "cancelled",
+        "cancelled"
       ]);
 
     if (
@@ -434,12 +495,8 @@ export function createPersistentStore(
     await database.execute(
       `
       UPDATE approvals
-      SET
-        status = ?,
-        resolved_by = ?,
-        updated_at = datetime('now')
-      WHERE id = ?
-        AND status = 'pending'
+      SET status = ?, resolved_by = ?, resolved_at = datetime('now')
+      WHERE id = ? AND status = 'pending'
       `,
       status,
       resolvedBy ||
@@ -462,32 +519,28 @@ export function createPersistentStore(
         200
       );
 
-    return database.all(
-      `
-      SELECT *
-      FROM approvals
-      WHERE status = 'pending'
-      ORDER BY created_at ASC
-      LIMIT ?
-      `,
-      safeLimit
+    const rows =
+      await database.all(
+        `SELECT * FROM approvals WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?`,
+        safeLimit
+      );
+
+    return rows.map(
+      normalizeApproval
     );
   }
 
   return {
     database,
-
     createTask,
     getTask,
     updateTask,
     listTasks,
-
     appendEvent,
     recentEvents,
-
     createApproval,
     getApproval,
     resolveApproval,
-    pendingApprovals,
+    pendingApprovals
   };
 }
