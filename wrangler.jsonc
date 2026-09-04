@@ -1,32 +1,32 @@
-npx wrangler secret put OPENROUTER_API_KEY
-npx wrangler secret put TELEGRAM_GROUP_ID
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "dpdpready-ai",
+  "main": "./src/index.js",
+  "compatibility_date": "2026-09-04",
+  "compatibility_flags": ["nodejs_compat"],
 
-# Bot tokens
-npx wrangler secret put OPS_BOT_TOKEN
-npx wrangler secret put GROWTH_BOT_TOKEN
-npx wrangler secret put RESEARCH_BOT_TOKEN
-npx wrangler secret put ANALYST_BOT_TOKEN
-npx wrangler secret put SUPPORT_BOT_TOKEN
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dpdpreadyai",
+      "database_id": "c927d9d1-e99c-426d-a55d-ef231350f601",
+      "migrations_dir": "migrations"
+    }
+  ],
 
-# GitHub
-npx wrangler secret put GITHUB_TOKEN
-npx wrangler secret put GITHUB_OWNER
-npx wrangler secret put GITHUB_REPO
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
 
-# Render
-npx wrangler secret put RENDER_API_KEY
-npx wrangler secret put RENDER_SERVICE_ID
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
 
-# Cloudflare
-npx wrangler secret put CLOUDFLARE_API_TOKEN
-npx wrangler secret put CLOUDFLARE_ACCOUNT_ID
-
-# Admin auth
-npx wrangler secret put ADMIN_API_TOKEN
-
-# Email (adjust to whatever your email provider needs)
-npx wrangler secret put EMAIL_API_KEY
-npx wrangler secret put EMAIL_FROM_ADDRESS
-
-# Webhook secret (new — see step 6)
-npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
+  "vars": {
+    "APP_NAME": "DPDPReady AI",
+    "APP_URL": "https://dpdpready.onrender.com",
+    "LLM_TIMEOUT_MS": "25000",
+    "APPROVAL_TTL_MS": "900000"
+  }
+}
