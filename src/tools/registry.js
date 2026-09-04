@@ -1,795 +1,1157 @@
 // src/tools/registry.js
 
 import { createGitHubClient } from "./github.js";
-import { createRenderClient, createCloudflareClient } from "./deployment.js";
-import { createDatabase } from "./database.js";
+import {
+  createRenderClient,
+  createCloudflareClient,
+} from "./deployment.js";
 import { createWebClient } from "./web.js";
 import { createAnalyticsClient } from "./analytics.js";
 import { createTelegramClient } from "./communication.js";
 import { createBrowserClient } from "./browser.js";
 import { createQAClient } from "./qa.js";
 import { createCodeClient } from "./code.js";
-import { createEmailClient } from "./email.js";
-import { createEmailVerificationClient } from "./emailVerification.js";
-import { createLeadsClient } from "./leads.js";
-import { createCampaignsClient } from "./campaigns.js";
-import { createCRMClient } from "./crm.js";
-import { createCustomersClient } from "./customers.js";
-import { createTicketsClient } from "./tickets.js";
-import { createSupportClient } from "./support.js";
-import { createResearchClient } from "./research.js";
-import { createResearchMemory } from "../memory/research.js";
-import { createCitationStore } from "../memory/citations.js";
-import { createMetricsClient } from "./metrics.js";
-import { createAdvancedAnalyticsClient } from "./advancedAnalytics.js";
-import { createForecastingClient } from "./forecasting.js";
-import { createExperimentsClient } from "./experiments.js";
 
-function def(name, description, parameters = { type: "object", properties: {}, additionalProperties: false }) {
+import { createEmailTool } from "./email.js";
+import { createEmailVerificationTool } from "./emailVerification.js";
+import { createLeadsTool } from "./leads.js";
+import { createCampaignsTool } from "./campaigns.js";
+import { createCRMTool } from "./crm.js";
+import { createCustomersTool } from "./customers.js";
+import { createTicketsTool } from "./tickets.js";
+import { createSupportTool } from "./support.js";
+import { createResearchTool } from "./research.js";
+
+import { createResearchMemoryTool } from "../memory/research.js";
+import { createCitationsTool } from "../memory/citations.js";
+
+import { createMetricsTool } from "./metrics.js";
+import { createAdvancedAnalyticsTool } from "./advancedAnalytics.js";
+import { createForecastingTool } from "./forecasting.js";
+import { createExperimentsTool } from "./experiments.js";
+
+function definition(
+  name,
+  description,
+  properties = {},
+  required = []
+) {
   return {
     type: "function",
-    function: { name, description, parameters }
+    function: {
+      name,
+      description,
+      parameters: {
+        type: "object",
+        properties,
+        required,
+        additionalProperties: false,
+      },
+    },
   };
 }
 
-function tool(name, description, execute, extra = {}, parameters) {
+function makeTool(
+  name,
+  description,
+  execute,
+  options = {},
+) {
   return {
     name,
-    definition: def(name, description, parameters),
+    definition: definition(
+      name,
+      description,
+      options.properties || {},
+      options.required || [],
+    ),
     execute,
-    ...extra
+    permission: options.permission,
+    requiresApproval:
+      options.requiresApproval || false,
   };
 }
 
-/**
- * Create a client safely. If env vars are missing, returns null
- * and logs a warning instead of crashing the worker.
- */
-function safeClient(factory, name) {
+function safeFactory(factory, name) {
   try {
     return factory();
   } catch (error) {
-    console.warn(`[ToolRegistry] ${name} client unavailable: ${error.message}`);
+    console.warn(
+      `[ToolRegistry] ${name} unavailable: ${error?.message || error}`,
+    );
     return null;
   }
 }
 
-function requireClient(client, name) {
-  if (!client) {
-    return { ok: false, error: `${name} integration is not configured.` };
-  }
-  return null;
-}
-
-export function createToolRegistry(env = {}) {
-  const database   = safeClient(() => createDatabase(env), "database");
-  const github     = safeClient(() => createGitHubClient(env), "github");
-  const render     = safeClient(() => createRenderClient(env), "render");
-  const cloudflare = safeClient(() => createCloudflareClient(env), "cloudflare");
-  const web        = safeClient(() => createWebClient(env), "web");
-  const analytics  = safeClient(() => createAnalyticsClient(database), "analytics");
-  const telegram   = safeClient(() => createTelegramClient(env), "telegram");
-  const browser    = safeClient(() => createBrowserClient(env), "browser");
-  const qa         = safeClient(() => createQAClient(env), "qa");
-  const code       = safeClient(() => createCodeClient(github), "code");
-  const email      = safeClient(() => createEmailClient(env, { database }), "email");
-  const emailVerification = safeClient(() => createEmailVerificationClient(env), "emailVerification");
-  const leads      = safeClient(() => createLeadsClient(database, { web, emailVerification }), "leads");
-  const campaigns  = safeClient(() => createCampaignsClient(database, { email }), "campaigns");
-  const crm        = safeClient(() => createCRMClient(database), "crm");
-  const customers  = safeClient(() => createCustomersClient(database), "customers");
-  const tickets    = safeClient(() => createTicketsClient(database), "tickets");
-  const support    = safeClient(() => createSupportClient({ database, customers, tickets, email }), "support");
-  const research   = safeClient(() => createResearchClient(database), "research");
-  const researchMemory = safeClient(() => createResearchMemory(database), "researchMemory");
-  const citations  = safeClient(() => createCitationStore(database), "citations");
-  const metrics    = safeClient(() => createMetricsClient(database), "metrics");
-  const advancedAnalytics = safeClient(() => createAdvancedAnalyticsClient(database), "advancedAnalytics");
-  const forecasting = safeClient(() => createForecastingClient(database), "forecasting");
-  const experiments = safeClient(() => createExperimentsClient(database), "experiments");
-
+function unavailable(name) {
   return {
-    health_check: tool(
-      "health_check",
-      "Check the application health.",
-      async ({ args }) => {
-        const checkUrl = args?.url || env.APP_URL || "https://dpdpready.online";
-        const response = await fetch(checkUrl, { redirect: "follow" });
-        return { ok: response.ok, status: response.status, url: checkUrl };
-      },
-      { permission: "website.read" },
-      { type: "object", properties: { url: { type: "string" } }, required: [], additionalProperties: false }
-    ),
-
-    get_logs: tool(
-      "get_logs",
-      "Read recent Render deployment logs.",
-      async ({ args }) => {
-        const offline = requireClient(render, "Render");
-        if (offline) return offline;
-        return render.listLogs(args);
-      },
-      { permission: "deployment.read" }
-    ),
-
-    get_deployment: tool(
-      "get_deployment",
-      "Get a Render deployment.",
-      async ({ args }) => {
-        const offline = requireClient(render, "Render");
-        if (offline) return offline;
-        return render.getDeployment(args);
-      },
-      { permission: "deployment.read" }
-    ),
-
-    github_repository: tool(
-      "github_repository",
-      "Get repository metadata.",
-      async () => {
-        const offline = requireClient(github, "GitHub");
-        if (offline) return offline;
-        return github.getRepository();
-      },
-      { permission: "github.read" }
-    ),
-
-    github_get_branch: tool(
-      "github_get_branch",
-      "Get branch information.",
-      async ({ args }) => {
-        const offline = requireClient(github, "GitHub");
-        if (offline) return offline;
-        return github.getBranch(args);
-      },
-      { permission: "github.read" }
-    ),
-
-    github_list_branches: tool(
-      "github_list_branches",
-      "List repository branches.",
-      async ({ args }) => {
-        const offline = requireClient(github, "GitHub");
-        if (offline) return offline;
-        return github.listBranches(args);
-      },
-      { permission: "github.read" }
-    ),
-
-    github_get_file: tool(
-      "github_get_file",
-      "Read a file from the repository.",
-      async ({ args }) => {
-        const offline = requireClient(github, "GitHub");
-        if (offline) return offline;
-        return github.getFile(args);
-      },
-      { permission: "github.read" }
-    ),
-
-    github_compare: tool(
-      "github_compare",
-      "Compare two Git refs.",
-      async ({ args }) => {
-        const offline = requireClient(github, "GitHub");
-        if (offline) return offline;
-        return github.compare(args);
-      },
-      { permission: "github.read" }
-    ),
-
-    create_branch: tool(
-      "create_branch",
-      "Create a Git branch.",
-      async ({ args }) => {
-        const offline = requireClient(github, "GitHub");
-        if (offline) return offline;
-        return github.createBranch(args);
-      },
-      { permission: "github.createBranch", requiresApproval: true }
-    ),
-
-    create_pull_request: tool(
-      "create_pull_request",
-      "Create a GitHub pull request.",
-      async ({ args }) => {
-        const offline = requireClient(github, "GitHub");
-        if (offline) return offline;
-        return github.createPullRequest(args);
-      },
-      { permission: "github.createPR", requiresApproval: true }
-    ),
-
-    github_create_branch: tool(
-      "github_create_branch",
-      "Create a Git branch.",
-      async ({ args }) => {
-        const offline = requireClient(github, "GitHub");
-        if (offline) return offline;
-        return github.createBranch(args);
-      },
-      { permission: "github.createBranch", requiresApproval: true }
-    ),
-
-    github_update_file: tool(
-      "github_update_file",
-      "Create or update a repository file.",
-      async ({ args }) => {
-        const offline = requireClient(github, "GitHub");
-        if (offline) return offline;
-        return github.updateFile(args);
-      },
-      { permission: "github.write", requiresApproval: true }
-    ),
-
-    github_create_pr: tool(
-      "github_create_pr",
-      "Open a pull request.",
-      async ({ args }) => {
-        const offline = requireClient(github, "GitHub");
-        if (offline) return offline;
-        return github.createPullRequest(args);
-      },
-      { permission: "github.createPR", requiresApproval: true }
-    ),
-
-    code_read_file: tool(
-      "code_read_file",
-      "Read a repository file through the code layer.",
-      async ({ args }) => {
-        const offline = requireClient(code, "Code");
-        if (offline) return offline;
-        return code.readFile(args);
-      },
-      { permission: "code.read" }
-    ),
-
-    code_replace_exact: tool(
-      "code_replace_exact",
-      "Safely replace one exact code block.",
-      async ({ args }) => {
-        const offline = requireClient(code, "Code");
-        if (offline) return offline;
-        return code.replaceExact(args);
-      },
-      { permission: "code.write", requiresApproval: true }
-    ),
-
-    code_apply_patch: tool(
-      "code_apply_patch",
-      "Apply a bounded exact replacement patch.",
-      async ({ args }) => {
-        const offline = requireClient(code, "Code");
-        if (offline) return offline;
-        return code.applyUnifiedPatch(args);
-      },
-      { permission: "code.write", requiresApproval: true }
-    ),
-
-    code_basic_syntax_check: tool(
-      "code_basic_syntax_check",
-      "Perform a basic JavaScript delimiter/string syntax check.",
-      async ({ args }) => {
-        const offline = requireClient(code, "Code");
-        if (offline) return offline;
-        return code.basicSyntaxCheck(args.source);
-      },
-      { permission: "code.read" }
-    ),
-
-    browser_check_page: tool(
-      "browser_check_page",
-      "Load a page in a remote browser and inspect it.",
-      async ({ args }) => {
-        const offline = requireClient(browser, "Browser");
-        if (offline) return offline;
-        return browser.inspect(args);
-      },
-      { permission: "browser.use" }
-    ),
-
-    browser_screenshot: tool(
-      "browser_screenshot",
-      "Capture a rendered webpage screenshot.",
-      async ({ args }) => {
-        const offline = requireClient(browser, "Browser");
-        if (offline) return offline;
-        return browser.screenshot(args);
-      },
-      { permission: "browser.use" }
-    ),
-
-    browser_run: tool(
-      "browser_run",
-      "Execute bounded browser code.",
-      async ({ args }) => {
-        const offline = requireClient(browser, "Browser");
-        if (offline) return offline;
-        return browser.run(args);
-      },
-      { permission: "browser.use" }
-    ),
-
-    qa_smoke_test: tool(
-      "qa_smoke_test",
-      "Run a production smoke test.",
-      async ({ args }) => {
-        const offline = requireClient(qa, "QA");
-        if (offline) return offline;
-        return qa.smokeTest(args);
-      },
-      { permission: "browser.use" }
-    ),
-
-    qa_regression: tool(
-      "qa_regression",
-      "Run bounded browser journeys.",
-      async ({ args }) => {
-        const offline = requireClient(qa, "QA");
-        if (offline) return offline;
-        return qa.regression(args);
-      },
-      { permission: "browser.use" }
-    ),
-
-    render_get_deployment: tool(
-      "render_get_deployment",
-      "Get a deployment by ID.",
-      async ({ args }) => {
-        const offline = requireClient(render, "Render");
-        if (offline) return offline;
-        return render.getDeployment(args);
-      },
-      { permission: "deployment.read" }
-    ),
-
-    render_list_deployments: tool(
-      "render_list_deployments",
-      "List recent deployments.",
-      async ({ args }) => {
-        const offline = requireClient(render, "Render");
-        if (offline) return offline;
-        return render.listDeployments(args);
-      },
-      { permission: "deployment.read" }
-    ),
-
-    render_logs: tool(
-      "render_logs",
-      "Fetch deployment logs.",
-      async ({ args }) => {
-        const offline = requireClient(render, "Render");
-        if (offline) return offline;
-        return render.listLogs(args);
-      },
-      { permission: "deployment.read" }
-    ),
-
-    render_deploy: tool(
-      "render_deploy",
-      "Trigger a production deployment.",
-      async ({ args }) => {
-        const offline = requireClient(render, "Render");
-        if (offline) return offline;
-        return render.triggerDeploy(args);
-      },
-      { permission: "deployment.deploy", requiresApproval: true }
-    ),
-
-    render_rollback: tool(
-      "render_rollback",
-      "Roll back a production deployment.",
-      async ({ args }) => {
-        const offline = requireClient(render, "Render");
-        if (offline) return offline;
-        return render.rollback?.(args) ?? { ok: false, error: "Rollback not available." };
-      },
-      { permission: "deployment.rollback", requiresApproval: true }
-    ),
-
-    cloudflare_worker_versions: tool(
-      "cloudflare_worker_versions",
-      "List Worker versions.",
-      async ({ args }) => {
-        const offline = requireClient(cloudflare, "Cloudflare");
-        if (offline) return offline;
-        return cloudflare.workerVersions(args);
-      },
-      { permission: "deployment.read" }
-    ),
-
-    cloudflare_d1_query: tool(
-      "cloudflare_d1_query",
-      "Run a D1 query.",
-      async ({ args }) => {
-        const offline = requireClient(cloudflare, "Cloudflare");
-        if (offline) return offline;
-        return cloudflare.d1Query(args);
-      },
-      { permission: "database.read", requiresApproval: true }
-    ),
-
-    web_search: tool(
-      "web_search",
-      "Search the public web.",
-      async ({ args }) => {
-        const offline = requireClient(web, "Web");
-        if (offline) return offline;
-        return web.search(args);
-      },
-      { permission: "web.search" }
-    ),
-
-    web_fetch: tool(
-      "web_fetch",
-      "Fetch a public web page.",
-      async ({ args }) => {
-        const offline = requireClient(web, "Web");
-        if (offline) return offline;
-        return web.fetchPage(args);
-      },
-      { permission: "web.fetch" }
-    ),
-
-    get_users: tool(
-      "get_users",
-      "Get user analytics.",
-      async ({ args }) => {
-        const offline = requireClient(analytics, "Analytics");
-        if (offline) return offline;
-        return analytics.users(args);
-      },
-      { permission: "database.read" }
-    ),
-
-    get_audits: tool(
-      "get_audits",
-      "Get audit analytics.",
-      async ({ args }) => {
-        const offline = requireClient(analytics, "Analytics");
-        if (offline) return offline;
-        return analytics.audits(args);
-      },
-      { permission: "database.read" }
-    ),
-
-    get_revenue: tool(
-      "get_revenue",
-      "Get revenue analytics.",
-      async ({ args }) => {
-        const offline = requireClient(analytics, "Analytics");
-        if (offline) return offline;
-        return analytics.revenue(args);
-      },
-      { permission: "database.read" }
-    ),
-
-    get_campaign_stats: tool(
-      "get_campaign_stats",
-      "Get campaign analytics.",
-      async ({ args }) => {
-        const offline = requireClient(analytics, "Analytics");
-        if (offline) return offline;
-        return analytics.campaignStats(args);
-      },
-      { permission: "database.read" }
-    ),
-
-    get_analytics_overview: tool(
-      "get_analytics_overview",
-      "Get analytics overview.",
-      async ({ args }) => {
-        const offline = requireClient(analytics, "Analytics");
-        if (offline) return offline;
-        return analytics.overview(args);
-      },
-      { permission: "database.read" }
-    ),
-
-    metrics_snapshot: tool(
-      "metrics_snapshot",
-      "Get business KPI snapshot.",
-      async () => {
-        const offline = requireClient(metrics, "Metrics");
-        if (offline) return offline;
-        return metrics.snapshot();
-      },
-      { permission: "database.read" }
-    ),
-
-    advanced_analytics: tool(
-      "advanced_analytics",
-      "Run advanced business analytics.",
-      async ({ args }) => {
-        const offline = requireClient(advancedAnalytics, "Advanced Analytics");
-        if (offline) return offline;
-        return advancedAnalytics[args.mode || "health"](args);
-      },
-      { permission: "database.read" }
-    ),
-
-    forecast_metrics: tool(
-      "forecast_metrics",
-      "Produce a directional business forecast.",
-      async ({ args }) => {
-        const offline = requireClient(forecasting, "Forecasting");
-        if (offline) return offline;
-        return args.mode === "users"
-          ? forecasting.forecastUsers(args)
-          : forecasting.forecastRevenue(args);
-      },
-      { permission: "database.read" }
-    ),
-
-    create_experiment: tool(
-      "create_experiment",
-      "Create a measurable product experiment.",
-      async ({ args }) => {
-        const offline = requireClient(experiments, "Experiments");
-        if (offline) return offline;
-        return experiments.create(args);
-      },
-      { permission: "database.write" }
-    ),
-
-    record_experiment: tool(
-      "record_experiment",
-      "Record an experiment observation.",
-      async ({ args }) => {
-        const offline = requireClient(experiments, "Experiments");
-        if (offline) return offline;
-        return experiments.record(args);
-      },
-      { permission: "database.write" }
-    ),
-
-    save_lead: tool(
-      "save_lead",
-      "Create a sales lead.",
-      async ({ args }) => {
-        const offline = requireClient(leads, "Leads");
-        if (offline) return offline;
-        return leads.create(args);
-      },
-      { permission: "database.write" }
-    ),
-
-    list_leads: tool(
-      "list_leads",
-      "List sales leads.",
-      async ({ args }) => {
-        const offline = requireClient(leads, "Leads");
-        if (offline) return offline;
-        return leads.list(args);
-      },
-      { permission: "database.read" }
-    ),
-
-    qualify_lead: tool(
-      "qualify_lead",
-      "Update lead qualification.",
-      async ({ args }) => {
-        const offline = requireClient(leads, "Leads");
-        if (offline) return offline;
-        return leads.qualify(args);
-      },
-      { permission: "database.write" }
-    ),
-
-    verify_email: tool(
-      "verify_email",
-      "Verify a prospect email address.",
-      async ({ args }) => {
-        const offline = requireClient(emailVerification, "Email Verification");
-        if (offline) return offline;
-        return leads.verify(args);
-      },
-      { permission: "web.search" }
-    ),
-
-    crm_update_lead: tool(
-      "crm_update_lead",
-      "Update a lead's pipeline state.",
-      async ({ args }) => {
-        const offline = requireClient(crm, "CRM");
-        if (offline) return offline;
-        return crm.updateLead(args);
-      },
-      { permission: "database.write" }
-    ),
-
-    campaign_create: tool(
-      "campaign_create",
-      "Create a campaign.",
-      async ({ args }) => {
-        const offline = requireClient(campaigns, "Campaigns");
-        if (offline) return offline;
-        return campaigns.create(args);
-      },
-      { permission: "database.write" }
-    ),
-
-    campaign_add_message: tool(
-      "campaign_add_message",
-      "Add a message to a campaign.",
-      async ({ args }) => {
-        const offline = requireClient(campaigns, "Campaigns");
-        if (offline) return offline;
-        return campaigns.addMessage(args);
-      },
-      { permission: "database.write" }
-    ),
-
-    campaign_send: tool(
-      "campaign_send",
-      "Send approved campaign messages.",
-      async ({ args }) => {
-        const offline = requireClient(campaigns, "Campaigns");
-        if (offline) return offline;
-        return campaigns.send(args);
-      },
-      { permission: "communication.email", requiresApproval: true }
-    ),
-
-    email_send: tool(
-      "email_send",
-      "Send an approved customer or prospect email.",
-      async ({ args }) => {
-        const offline = requireClient(email, "Email");
-        if (offline) return offline;
-        return email.send(args);
-      },
-      { permission: "communication.email", requiresApproval: true }
-    ),
-
-    get_customer: tool(
-      "get_customer",
-      "Find a customer.",
-      async ({ args }) => {
-        const offline = requireClient(customers, "Customers");
-        if (offline) return offline;
-        return customers.get(args);
-      },
-      { permission: "customers.read" }
-    ),
-
-    get_customer_audit: tool(
-      "get_customer_audit",
-      "Get a customer's latest audit.",
-      async ({ args }) => {
-        const offline = requireClient(database, "Database");
-        if (offline) return offline;
-        return database.first(
-          `SELECT * FROM audits WHERE user_id = ? ORDER BY created_at DESC LIMIT 1`,
-          args.customerId
-        );
-      },
-      { permission: "database.read" }
-    ),
-
-    create_support_ticket: tool(
-      "create_support_ticket",
-      "Create a support ticket.",
-      async ({ args }) => {
-        const offline = requireClient(tickets, "Tickets");
-        if (offline) return offline;
-        return tickets.create(args);
-      },
-      { permission: "tickets.write" }
-    ),
-
-    update_support_ticket: tool(
-      "update_support_ticket",
-      "Update a support ticket.",
-      async ({ args }) => {
-        const offline = requireClient(tickets, "Tickets");
-        if (offline) return offline;
-        return tickets.update(args);
-      },
-      { permission: "tickets.write" }
-    ),
-
-    escalate_support_ticket: tool(
-      "escalate_support_ticket",
-      "Escalate a support ticket.",
-      async ({ args }) => {
-        const offline = requireClient(tickets, "Tickets");
-        if (offline) return offline;
-        return tickets.update({ ...args, status: "escalated", priority: args.priority || "high" });
-      },
-      { permission: "tickets.write" }
-    ),
-
-    customer_context: tool(
-      "customer_context",
-      "Build a customer support context.",
-      async ({ args }) => {
-        const offline = requireClient(support, "Support");
-        if (offline) return offline;
-        return support.customerContext(args);
-      },
-      { permission: "customers.read" }
-    ),
-
-    support_email_send: tool(
-      "support_email_send",
-      "Send an approved support email.",
-      async ({ args }) => {
-        const offline = requireClient(support, "Support");
-        if (offline) return offline;
-        return support.replyByEmail(args);
-      },
-      { permission: "communication.email", requiresApproval: true }
-    ),
-
-    research_save: tool(
-      "research_save",
-      "Store a research finding.",
-      async ({ args }) => {
-        const offline = requireClient(research, "Research");
-        if (offline) return offline;
-        return research.save(args);
-      },
-      { permission: "research.write" }
-    ),
-
-    research_search: tool(
-      "research_search",
-      "Search research memory.",
-      async ({ args }) => {
-        const offline = requireClient(researchMemory, "Research Memory");
-        if (offline) return offline;
-        return researchMemory.search(args);
-      },
-      { permission: "research.read" }
-    ),
-
-    research_list: tool(
-      "research_list",
-      "List stored research.",
-      async ({ args }) => {
-        const offline = requireClient(research, "Research");
-        if (offline) return offline;
-        return research.list(args);
-      },
-      { permission: "research.read" }
-    ),
-
-    research_alerts: tool(
-      "research_alerts",
-      "Create or list research alerts.",
-      async ({ args }) => {
-        const offline = requireClient(research, "Research");
-        if (offline) return offline;
-        return args.action === "list"
-          ? research.listAlerts(args)
-          : research.createAlert(args);
-      },
-      { permission: "research.alerts" }
-    ),
-
-    research_citation_save: tool(
-      "research_citation_save",
-      "Save a verified research source.",
-      async ({ args }) => {
-        const offline = requireClient(citations, "Citations");
-        if (offline) return offline;
-        return citations.save(args);
-      },
-      { permission: "research.citations" }
-    ),
-
-    telegram_send: tool(
-      "telegram_send",
-      "Send a Telegram message.",
-      async ({ args }) => {
-        const offline = requireClient(telegram, "Telegram");
-        if (offline) return offline;
-        return telegram.sendMessage(args);
-      },
-      { permission: "communication.telegram", requiresApproval: true }
-    )
+    ok: false,
+    error: `${name} integration is not configured.`,
   };
 }
 
-export const TOOL_REGISTRY = {};
+export function createToolRegistry(env = {}) {
+  const github = safeFactory(
+    () => createGitHubClient(env),
+    "github",
+  );
+
+  const render = safeFactory(
+    () => createRenderClient(env),
+    "render",
+  );
+
+  const cloudflare = safeFactory(
+    () => createCloudflareClient(env),
+    "cloudflare",
+  );
+
+  const web = safeFactory(
+    () => createWebClient(env),
+    "web",
+  );
+
+  const telegram = safeFactory(
+    () => createTelegramClient(env),
+    "telegram",
+  );
+
+  const browser = safeFactory(
+    () => createBrowserClient(env),
+    "browser",
+  );
+
+  const qa = safeFactory(
+    () => createQAClient(env),
+    "qa",
+  );
+
+  const code = safeFactory(
+    () => createCodeClient(github),
+    "code",
+  );
+
+  const database =
+    env.DB || null;
+
+  const analytics = safeFactory(
+    () => createAnalyticsClient(database),
+    "analytics",
+  );
+
+  const email = safeFactory(
+    () => createEmailTool(env),
+    "email",
+  );
+
+  const emailVerification = safeFactory(
+    () => createEmailVerificationTool(env),
+    "emailVerification",
+  );
+
+  const leads = safeFactory(
+    () =>
+      createLeadsTool(env, {
+        emailVerification,
+      }),
+    "leads",
+  );
+
+  const campaigns = safeFactory(
+    () =>
+      createCampaignsTool(env, {
+        email,
+      }),
+    "campaigns",
+  );
+
+  const crm = safeFactory(
+    () => createCRMTool(env),
+    "crm",
+  );
+
+  const customers = safeFactory(
+    () => createCustomersTool(env),
+    "customers",
+  );
+
+  const tickets = safeFactory(
+    () => createTicketsTool(env),
+    "tickets",
+  );
+
+  const support = safeFactory(
+    () =>
+      createSupportTool(env, {
+        customers,
+        tickets,
+        email,
+      }),
+    "support",
+  );
+
+  const research = safeFactory(
+    () => createResearchTool(env),
+    "research",
+  );
+
+  const researchMemory = safeFactory(
+    () => createResearchMemoryTool(env),
+    "researchMemory",
+  );
+
+  const citations = safeFactory(
+    () => createCitationsTool(env),
+    "citations",
+  );
+
+  const metrics = safeFactory(
+    () => createMetricsTool(env),
+    "metrics",
+  );
+
+  const advancedAnalytics = safeFactory(
+    () => createAdvancedAnalyticsTool(env),
+    "advancedAnalytics",
+  );
+
+  const forecasting = safeFactory(
+    () => createForecastingTool(env),
+    "forecasting",
+  );
+
+  const experiments = safeFactory(
+    () => createExperimentsTool(env),
+    "experiments",
+  );
+
+  const registry = {};
+
+  // ============================================================
+  // OPERATIONS
+  // ============================================================
+
+  registry.health_check = makeTool(
+    "health_check",
+    "Check application health.",
+    async ({ args }) => {
+      const url =
+        args?.url ||
+        env.APP_URL ||
+        "https://dpdpready.online";
+
+      try {
+        const response = await fetch(url, {
+          redirect: "follow",
+        });
+
+        return {
+          ok: response.ok,
+          status: response.status,
+          url,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          status: null,
+          url,
+          error: error.message,
+        };
+      }
+    },
+    {
+      permission: "website.read",
+      properties: {
+        url: {
+          type: "string",
+        },
+      },
+    },
+  );
+
+  registry.website_inspect = makeTool(
+    "website_inspect",
+    "Inspect the live website.",
+    async ({ args }) => {
+      if (!browser) return unavailable("Browser");
+
+      return browser.inspect(args || {});
+    },
+    {
+      permission: "browser.use",
+      properties: {
+        url: {
+          type: "string",
+        },
+      },
+      required: ["url"],
+    },
+  );
+
+  registry.github_repository = makeTool(
+    "github_repository",
+    "Get GitHub repository information.",
+    async () => {
+      if (!github) return unavailable("GitHub");
+
+      return github.getRepository();
+    },
+    {
+      permission: "github.read",
+    },
+  );
+
+  registry.github_get_file = makeTool(
+    "github_get_file",
+    "Read a repository file.",
+    async ({ args }) => {
+      if (!github) return unavailable("GitHub");
+
+      return github.getFile(args || {});
+    },
+    {
+      permission: "github.read",
+    },
+  );
+
+  registry.github_search_files = makeTool(
+    "github_search_files",
+    "Search repository files.",
+    async ({ args }) => {
+      if (!github) return unavailable("GitHub");
+
+      if (typeof github.searchFiles === "function") {
+        return github.searchFiles(args || {});
+      }
+
+      return unavailable("GitHub file search");
+    },
+    {
+      permission: "github.read",
+    },
+  );
+
+  registry.github_create_branch = makeTool(
+    "github_create_branch",
+    "Create a GitHub branch.",
+    async ({ args }) => {
+      if (!github) return unavailable("GitHub");
+
+      return github.createBranch(args || {});
+    },
+    {
+      permission: "github.createBranch",
+      requiresApproval: true,
+    },
+  );
+
+  registry.github_update_file = makeTool(
+    "github_update_file",
+    "Update a GitHub repository file.",
+    async ({ args }) => {
+      if (!code) return unavailable("Code");
+
+      return code.updateFile(args || {});
+    },
+    {
+      permission: "github.write",
+      requiresApproval: true,
+    },
+  );
+
+  registry.github_create_pr = makeTool(
+    "github_create_pr",
+    "Create a GitHub pull request.",
+    async ({ args }) => {
+      if (!github) return unavailable("GitHub");
+
+      return github.createPullRequest(args || {});
+    },
+    {
+      permission: "github.createPR",
+      requiresApproval: true,
+    },
+  );
+
+  registry.render_deploy = makeTool(
+    "render_deploy",
+    "Trigger a Render deployment.",
+    async ({ args }) => {
+      if (!render) return unavailable("Render");
+
+      return render.triggerDeploy(args || {});
+    },
+    {
+      permission: "deployment.deploy",
+      requiresApproval: true,
+    },
+  );
+
+  registry.render_rollback = makeTool(
+    "render_rollback",
+    "Rollback a Render deployment.",
+    async ({ args }) => {
+      if (!render) return unavailable("Render");
+
+      if (typeof render.rollback !== "function") {
+        return {
+          ok: false,
+          error: "Render rollback is not available.",
+        };
+      }
+
+      return render.rollback(args || {});
+    },
+    {
+      permission: "deployment.rollback",
+      requiresApproval: true,
+    },
+  );
+
+  registry.browser_open = makeTool(
+    "browser_open",
+    "Open and inspect a webpage.",
+    async ({ args }) => {
+      if (!browser) return unavailable("Browser");
+
+      return browser.inspect(args || {});
+    },
+    {
+      permission: "browser.use",
+    },
+  );
+
+  registry.browser_screenshot = makeTool(
+    "browser_screenshot",
+    "Capture a webpage screenshot.",
+    async ({ args }) => {
+      if (!browser) return unavailable("Browser");
+
+      return browser.screenshot(args || {});
+    },
+    {
+      permission: "browser.use",
+    },
+  );
+
+  registry.browser_run = makeTool(
+    "browser_run",
+    "Run a bounded browser workflow.",
+    async ({ args }) => {
+      if (!browser) return unavailable("Browser");
+
+      return browser.run(args || {});
+    },
+    {
+      permission: "browser.use",
+    },
+  );
+
+  registry.qa_run = makeTool(
+    "qa_run",
+    "Run a DPDPReady QA smoke test.",
+    async ({ args }) => {
+      if (!qa) return unavailable("QA");
+
+      return qa.smokeTest(args || {});
+    },
+    {
+      permission: "browser.use",
+    },
+  );
+
+  // ============================================================
+  // GROWTH
+  // ============================================================
+
+  registry.web_search = makeTool(
+    "web_search",
+    "Search the public web.",
+    async ({ args }) => {
+      if (!web) return unavailable("Web");
+
+      return web.search(args || {});
+    },
+    {
+      permission: "web.search",
+    },
+  );
+
+  registry.web_fetch = makeTool(
+    "web_fetch",
+    "Fetch a public web page.",
+    async ({ args }) => {
+      if (!web) return unavailable("Web");
+
+      return web.fetchPage(args || {});
+    },
+    {
+      permission: "web.fetch",
+    },
+  );
+
+  registry.save_lead = makeTool(
+    "save_lead",
+    "Save a lead.",
+    async ({ args }) => {
+      if (!leads) return unavailable("Leads");
+
+      return leads.create(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.list_leads = makeTool(
+    "list_leads",
+    "List leads.",
+    async ({ args }) => {
+      if (!leads) return unavailable("Leads");
+
+      return leads.list(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.qualify_lead = makeTool(
+    "qualify_lead",
+    "Qualify a lead.",
+    async ({ args }) => {
+      if (!leads) return unavailable("Leads");
+
+      return leads.qualify(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.verify_email = makeTool(
+    "verify_email",
+    "Verify an email address.",
+    async ({ args }) => {
+      if (!emailVerification) {
+        return unavailable("Email verification");
+      }
+
+      return emailVerification.verify(args || {});
+    },
+    {
+      permission: "web.fetch",
+    },
+  );
+
+  registry.campaign_create = makeTool(
+    "campaign_create",
+    "Create an email campaign.",
+    async ({ args }) => {
+      if (!campaigns) return unavailable("Campaigns");
+
+      return campaigns.create(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.campaign_add_message = makeTool(
+    "campaign_add_message",
+    "Add a message to a campaign.",
+    async ({ args }) => {
+      if (!campaigns) return unavailable("Campaigns");
+
+      return campaigns.addMessage(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.campaign_send = makeTool(
+    "campaign_send",
+    "Send queued campaign messages.",
+    async ({ args }) => {
+      if (!campaigns) return unavailable("Campaigns");
+
+      return campaigns.send({
+        ...(args || {}),
+        approved: true,
+      });
+    },
+    {
+      permission: "email.send",
+      requiresApproval: true,
+    },
+  );
+
+  registry.email_send = makeTool(
+    "email_send",
+    "Send an email.",
+    async ({ args }) => {
+      if (!email) return unavailable("Email");
+
+      return email.send({
+        ...(args || {}),
+        approved: true,
+      });
+    },
+    {
+      permission: "email.send",
+      requiresApproval: true,
+    },
+  );
+
+  registry.crm_update_lead = makeTool(
+    "crm_update_lead",
+    "Update a CRM lead.",
+    async ({ args }) => {
+      if (!crm) return unavailable("CRM");
+
+      return crm.updateLead(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.get_campaign_stats = makeTool(
+    "get_campaign_stats",
+    "Get campaign statistics.",
+    async ({ args }) => {
+      if (!campaigns) return unavailable("Campaigns");
+
+      return campaigns.stats(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.get_analytics_overview = makeTool(
+    "get_analytics_overview",
+    "Get analytics overview.",
+    async ({ args }) => {
+      if (!analytics) return unavailable("Analytics");
+
+      if (
+        typeof analytics.overview ===
+        "function"
+      ) {
+        return analytics.overview(args || {});
+      }
+
+      return unavailable("Analytics overview");
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  // ============================================================
+  // ANALYTICS
+  // ============================================================
+
+  registry.get_users = makeTool(
+    "get_users",
+    "Get user analytics.",
+    async ({ args }) => {
+      if (!analytics) return unavailable("Analytics");
+
+      return analytics.users(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.get_audits = makeTool(
+    "get_audits",
+    "Get audit analytics.",
+    async ({ args }) => {
+      if (!analytics) return unavailable("Analytics");
+
+      if (typeof analytics.audits === "function") {
+        return analytics.audits(args || {});
+      }
+
+      return unavailable("Audit analytics");
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.get_revenue = makeTool(
+    "get_revenue",
+    "Get revenue analytics.",
+    async ({ args }) => {
+      if (analytics) {
+        if (typeof analytics.revenue === "function") {
+          return analytics.revenue(args || {});
+        }
+      }
+
+      if (advancedAnalytics) {
+        return advancedAnalytics.revenue(args || {});
+      }
+
+      return unavailable("Revenue analytics");
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.metrics_snapshot = makeTool(
+    "metrics_snapshot",
+    "Get a metrics snapshot.",
+    async () => {
+      if (!metrics) return unavailable("Metrics");
+
+      return metrics.snapshot({});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.advanced_analytics = makeTool(
+    "advanced_analytics",
+    "Run advanced analytics.",
+    async ({ args }) => {
+      if (!advancedAnalytics) {
+        return unavailable(
+          "Advanced analytics",
+        );
+      }
+
+      return advancedAnalytics.health(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.forecast_metrics = makeTool(
+    "forecast_metrics",
+    "Forecast business metrics.",
+    async ({ args }) => {
+      if (!forecasting) {
+        return unavailable("Forecasting");
+      }
+
+      const metric =
+        args?.metric || "users";
+
+      if (
+        metric === "revenue" &&
+        typeof forecasting.forecastRevenue ===
+          "function"
+      ) {
+        return forecasting.forecastRevenue(
+          args || {},
+        );
+      }
+
+      return forecasting.forecastUsers(
+        args || {},
+      );
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.create_experiment = makeTool(
+    "create_experiment",
+    "Create an experiment.",
+    async ({ args }) => {
+      if (!experiments) {
+        return unavailable("Experiments");
+      }
+
+      return experiments.create(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.record_experiment = makeTool(
+    "record_experiment",
+    "Record an experiment observation.",
+    async ({ args }) => {
+      if (!experiments) {
+        return unavailable("Experiments");
+      }
+
+      return experiments.record(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  // ============================================================
+  // RESEARCH
+  // ============================================================
+
+  registry.research_search = makeTool(
+    "research_search",
+    "Search saved research.",
+    async ({ args }) => {
+      if (!research) return unavailable("Research");
+
+      return research.search(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.research_save = makeTool(
+    "research_save",
+    "Save research.",
+    async ({ args }) => {
+      if (!research) return unavailable("Research");
+
+      return research.save(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.research_list = makeTool(
+    "research_list",
+    "List saved research.",
+    async ({ args }) => {
+      if (!research) return unavailable("Research");
+
+      return research.list(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.research_alerts = makeTool(
+    "research_alerts",
+    "List regulatory research alerts.",
+    async ({ args }) => {
+      if (!research) return unavailable("Research");
+
+      return research.listAlerts(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.research_citation_save = makeTool(
+    "research_citation_save",
+    "Save a research citation.",
+    async ({ args }) => {
+      if (!citations) return unavailable("Citations");
+
+      return citations.save(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  // ============================================================
+  // SUPPORT
+  // ============================================================
+
+  registry.get_customer = makeTool(
+    "get_customer",
+    "Get a customer.",
+    async ({ args }) => {
+      if (!customers) return unavailable("Customers");
+
+      return customers.get(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.get_customer_audit = makeTool(
+    "get_customer_audit",
+    "Get customer audit information.",
+    async ({ args }) => {
+      if (!analytics) return unavailable("Analytics");
+
+      if (
+        typeof analytics.customerAudit ===
+        "function"
+      ) {
+        return analytics.customerAudit(
+          args || {},
+        );
+      }
+
+      return unavailable("Customer audit");
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.create_support_ticket = makeTool(
+    "create_support_ticket",
+    "Create a support ticket.",
+    async ({ args }) => {
+      if (!support) return unavailable("Support");
+
+      return support.createTicket(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.update_support_ticket = makeTool(
+    "update_support_ticket",
+    "Update a support ticket.",
+    async ({ args }) => {
+      if (!support) return unavailable("Support");
+
+      return support.updateTicket(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.escalate_support_ticket = makeTool(
+    "escalate_support_ticket",
+    "Escalate a support ticket.",
+    async ({ args }) => {
+      if (!tickets) return unavailable("Tickets");
+
+      return tickets.update({
+        ...(args || {}),
+        status: "in_progress",
+      });
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.customer_context = makeTool(
+    "customer_context",
+    "Get customer support context.",
+    async ({ args }) => {
+      if (!support) return unavailable("Support");
+
+      return support.customerContext(
+        args || {},
+      );
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.support_email_send = makeTool(
+    "support_email_send",
+    "Send a support email.",
+    async ({ args }) => {
+      if (!support) return unavailable("Support");
+
+      return support.replyByEmail({
+        ...(args || {}),
+        approved: true,
+      });
+    },
+    {
+      permission: "email.send",
+      requiresApproval: true,
+    },
+  );
+
+  // ============================================================
+  // OPTIONAL HELPERS
+  // ============================================================
+
+  registry.research_memory_save = makeTool(
+    "research_memory_save",
+    "Save research memory.",
+    async ({ args }) => {
+      if (!researchMemory) {
+        return unavailable("Research memory");
+      }
+
+      return researchMemory.remember(
+        args || {},
+      );
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.research_memory_get = makeTool(
+    "research_memory_get",
+    "Get research memory.",
+    async ({ args }) => {
+      if (!researchMemory) {
+        return unavailable("Research memory");
+      }
+
+      return researchMemory.get(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.research_memory_search = makeTool(
+    "research_memory_search",
+    "Search research memory.",
+    async ({ args }) => {
+      if (!researchMemory) {
+        return unavailable("Research memory");
+      }
+
+      return researchMemory.search(
+        args || {},
+      );
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.citation_search = makeTool(
+    "citation_search",
+    "Search saved citations.",
+    async ({ args }) => {
+      if (!citations) return unavailable("Citations");
+
+      return citations.search(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.metrics_daily = makeTool(
+    "metrics_daily",
+    "Get daily metrics.",
+    async ({ args }) => {
+      if (!metrics) return unavailable("Metrics");
+
+      return metrics.daily(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.metrics_funnel = makeTool(
+    "metrics_funnel",
+    "Get the analytics funnel.",
+    async ({ args }) => {
+      if (!metrics) return unavailable("Metrics");
+
+      return metrics.funnel(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.forecast_revenue = makeTool(
+    "forecast_revenue",
+    "Forecast revenue.",
+    async ({ args }) => {
+      if (!forecasting) {
+        return unavailable("Forecasting");
+      }
+
+      return forecasting.forecastRevenue(
+        args || {},
+      );
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.forecast_users = makeTool(
+    "forecast_users",
+    "Forecast users.",
+    async ({ args }) => {
+      if (!forecasting) {
+        return unavailable("Forecasting");
+      }
+
+      return forecasting.forecastUsers(
+        args || {},
+      );
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  registry.experiment_start = makeTool(
+    "experiment_start",
+    "Start an experiment.",
+    async ({ args }) => {
+      if (!experiments) {
+        return unavailable("Experiments");
+      }
+
+      return experiments.start(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.experiment_stop = makeTool(
+    "experiment_stop",
+    "Stop an experiment.",
+    async ({ args }) => {
+      if (!experiments) {
+        return unavailable("Experiments");
+      }
+
+      return experiments.stop(args || {});
+    },
+    {
+      permission: "database.write",
+    },
+  );
+
+  registry.experiment_analyze = makeTool(
+    "experiment_analyze",
+    "Analyze an experiment.",
+    async ({ args }) => {
+      if (!experiments) {
+        return unavailable("Experiments");
+      }
+
+      return experiments.analyze(args || {});
+    },
+    {
+      permission: "database.read",
+    },
+  );
+
+  // Keep the Telegram client initialized for future
+  // Telegram-facing tools and callbacks.
+  void telegram;
+  void cloudflare;
+
+  return registry;
+}
