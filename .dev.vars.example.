@@ -1,0 +1,40 @@
+# Non-secret local configuration
+APP_NAME=DPDPReady AI
+APP_URL=http://127.0.0.1:8787
+LLM_PROVIDERS=openai,openrouter
+LLM_TIMEOUT_MS=25000
+APPROVAL_TTL_MS=900000
+
+# For each provider in LLM_PROVIDERS, define:
+# LLM_<PROVIDER>_API_KEY=...
+# LLM_<PROVIDER>_BASE_URL=...
+# LLM_<PROVIDER>_MODEL=...
+#
+# Examples:
+# LLM_OPENAI_BASE_URL=https://api.openai.com/v1
+# LLM_OPENAI_MODEL=<your-model>
+# LLM_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+# LLM_OPENROUTER_MODEL=<your-model>
+
+TELEGRAM_GROUP_ID=<group-id>
+FOUNDER_CHAT_ID=<founder-chat-id>
+FOUNDER_TELEGRAM_ID=<founder-user-id>
+TELEGRAM_WEBHOOK_SECRET=<long-random-secret>
+OPS_BOT_TOKEN=<ops-bot-token>
+GROWTH_BOT_TOKEN=<growth-bot-token>
+RESEARCH_BOT_TOKEN=<research-bot-token>
+ANALYST_BOT_TOKEN=<analyst-bot-token>
+SUPPORT_BOT_TOKEN=<support-bot-token>
+
+ADMIN_API_TOKEN=<admin-token>
+
+# Optional external integrations
+GITHUB_TOKEN=<github-token>
+GITHUB_OWNER=<github-owner>
+GITHUB_REPO=<github-repo>
+RENDER_API_KEY=<render-api-key>
+RENDER_SERVICE_ID=<render-service-id>
+CLOUDFLARE_API_TOKEN=<cloudflare-api-token>
+CLOUDFLARE_ACCOUNT_ID=<cloudflare-account-id>
+EMAIL_API_KEY=<email-api-key>
+EMAIL_FROM_ADDRESS=<from-address>
