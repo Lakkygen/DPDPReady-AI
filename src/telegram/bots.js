@@ -1,18 +1,19 @@
-// src/telegram/bots.js
-
-import {
-  AGENTS
-} from "../config/agents.js";
+import { AGENTS } from "../config/agent.js";
 
 export function getBotConfigs(env) {
-  return Object.values(AGENTS)
+  return Object.values(
+    AGENTS
+  )
     .map((agent) => ({
       agentId: agent.id,
       name: agent.name,
-      token: env[agent.telegramEnvKey]
+      token:
+        env[
+          agent.telegramEnvKey
+        ] ?? null
     }))
-    .filter(
-      (bot) => Boolean(bot.token)
+    .filter((bot) =>
+      Boolean(bot.token)
     );
 }
 
@@ -20,7 +21,8 @@ export function getBotConfig(
   env,
   agentId
 ) {
-  const agent = AGENTS[agentId];
+  const agent =
+    AGENTS[agentId];
 
   if (!agent) {
     return null;
@@ -30,6 +32,8 @@ export function getBotConfig(
     agentId,
     name: agent.name,
     token:
-      env[agent.telegramEnvKey] ?? null
+      env[
+        agent.telegramEnvKey
+      ] ?? null
   };
 }
