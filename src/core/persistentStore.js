@@ -1,7 +1,9 @@
 import { createDatabase } from "../tools/database.js";
 
 function json(value) {
-  return JSON.stringify(value ?? {});
+  return JSON.stringify(
+    value ?? {}
+  );
 }
 
 function parseJson(
@@ -23,10 +25,12 @@ function parseJson(
     const parsed =
       JSON.parse(value);
 
-    return parsed &&
+    return (
+      parsed &&
       typeof parsed === "object"
-      ? parsed
-      : fallback;
+        ? parsed
+        : fallback
+    );
   } catch {
     return fallback;
   }
@@ -37,7 +41,7 @@ function normalizeTask(row) {
     return null;
   }
 
-  const payload =
+  const metadata =
     parseJson(
       row.metadata,
       {}
@@ -51,19 +55,34 @@ function normalizeTask(row) {
 
   return {
     ...row,
+
     assignedAgent:
-      row.assigned_to ?? null,
+      row.assigned_to ??
+      null,
+
     assignedTo:
-      row.assigned_to ?? null,
+      row.assigned_to ??
+      null,
+
     assigned_agent:
-      row.assigned_to ?? null,
-    payload,
+      row.assigned_to ??
+      null,
+
+    payload:
+      metadata,
+
     payload_json:
-      row.metadata ?? "{}",
+      row.metadata ??
+      "{}",
+
     result_json:
-      row.result ?? null,
+      row.result ??
+      null,
+
     error_text:
-      row.error ?? null,
+      row.error ??
+      null,
+
     result
   };
 }
@@ -75,14 +94,21 @@ function normalizeEvent(row) {
 
   return {
     ...row,
-    type: row.event_type,
-    source: row.actor,
+
+    type:
+      row.event_type,
+
+    source:
+      row.actor,
+
     payload_json:
       row.payload,
-    payload: parseJson(
-      row.payload,
-      {}
-    )
+
+    payload:
+      parseJson(
+        row.payload,
+        {}
+      )
   };
 }
 
@@ -99,22 +125,46 @@ function normalizeApproval(row) {
 
   return {
     ...row,
+
     task_id:
-      metadata.taskId ?? null,
+      metadata.taskId ??
+      null,
+
     payload_json:
-      row.metadata ?? "{}",
+      row.metadata ??
+      "{}",
+
     created_at:
       row.created_at,
+
     resolved_at:
-      row.resolved_at ?? null
+      row.resolved_at ??
+      null
   };
+}
+
+function normalizeLimit(
+  limit,
+  fallback = 50,
+  maximum = 200
+) {
+  return Math.min(
+    Math.max(
+      Number(limit) ||
+        fallback,
+      1
+    ),
+    maximum
+  );
 }
 
 export function createPersistentStore(env) {
   const database =
     createDatabase(env);
 
-  async function createTask(task) {
+  async function createTask(
+    task = {}
+  ) {
     const assignedTo =
       task.assignedAgent ??
       task.assignedTo ??
@@ -127,12 +177,16 @@ export function createPersistentStore(env) {
     }
 
     const id =
-      task.id ||
+      task.id ??
       crypto.randomUUID();
 
     const metadata = {
       ...(task.metadata ?? {}),
-      ...(task.payload ?? {})
+      ...(task.payload ?? {}),
+
+      type:
+        task.type ??
+        "general"
     };
 
     await database.execute(
@@ -150,17 +204,33 @@ export function createPersistentStore(env) {
         error,
         created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, NULL, NULL, datetime('now'))
+      VALUES (
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        'queued',
+        ?,
+        NULL,
+        NULL,
+        datetime('now')
+      )
       `,
       id,
-      task.title ||
-        "Untitled task",
-      task.description ||
-        "",
+      String(
+        task.title ??
+          "Untitled task"
+      ),
+      String(
+        task.description ??
+          ""
+      ),
       assignedTo,
-      task.createdBy ||
+      task.createdBy ??
         "system",
-      task.priority ||
+      task.priority ??
         "normal",
       json(metadata)
     );
@@ -278,9 +348,11 @@ export function createPersistentStore(env) {
     values.push(id);
 
     await database.execute(
-      `UPDATE tasks SET ${fields.join(
-        ", "
-      )} WHERE id = ?`,
+      `
+      UPDATE tasks
+      SET ${fields.join(", ")}
+      WHERE id = ?
+      `,
       ...values
     );
 
@@ -310,13 +382,7 @@ export function createPersistentStore(env) {
     }
 
     const safeLimit =
-      Math.min(
-        Math.max(
-          Number(limit) || 50,
-          1
-        ),
-        200
-      );
+      normalizeLimit(limit);
 
     params.push(
       safeLimit
@@ -331,7 +397,13 @@ export function createPersistentStore(env) {
 
     const rows =
       await database.all(
-        `SELECT * FROM tasks ${where} ORDER BY created_at DESC LIMIT ?`,
+        `
+        SELECT *
+        FROM tasks
+        ${where}
+        ORDER BY created_at DESC
+        LIMIT ?
+        `,
         ...params
       );
 
@@ -340,9 +412,11 @@ export function createPersistentStore(env) {
     );
   }
 
-  async function appendEvent(event) {
+  async function appendEvent(
+    event = {}
+  ) {
     const id =
-      event.id ||
+      event.id ??
       crypto.randomUUID();
 
     await database.execute(
@@ -354,18 +428,29 @@ export function createPersistentStore(env) {
         payload,
         created_at
       )
-      VALUES (?, ?, ?, ?, datetime('now'))
+      VALUES (
+        ?,
+        ?,
+        ?,
+        ?,
+        datetime('now')
+      )
       `,
       id,
-      event.type,
-      event.source ||
+      event.type ??
+        "unknown",
+      event.source ??
         "system",
       json(event.payload)
     );
 
     return normalizeEvent(
       await database.first(
-        `SELECT * FROM events WHERE id = ?`,
+        `
+        SELECT *
+        FROM events
+        WHERE id = ?
+        `,
         id
       )
     );
@@ -376,24 +461,37 @@ export function createPersistentStore(env) {
     limit = 50
   } = {}) {
     const safeLimit =
-      Math.min(
-        Math.max(
-          Number(limit) || 50,
-          1
-        ),
-        200
-      );
+      normalizeLimit(limit);
 
-    const rows = type
-      ? await database.all(
-          `SELECT * FROM events WHERE event_type = ? ORDER BY created_at DESC LIMIT ?`,
+    if (type) {
+      const rows =
+        await database.all(
+          `
+          SELECT *
+          FROM events
+          WHERE event_type = ?
+          ORDER BY created_at DESC
+          LIMIT ?
+          `,
           type,
           safeLimit
-        )
-      : await database.all(
-          `SELECT * FROM events ORDER BY created_at DESC LIMIT ?`,
-          safeLimit
         );
+
+      return rows.map(
+        normalizeEvent
+      );
+    }
+
+    const rows =
+      await database.all(
+        `
+        SELECT *
+        FROM events
+        ORDER BY created_at DESC
+        LIMIT ?
+        `,
+        safeLimit
+      );
 
     return rows.map(
       normalizeEvent
@@ -401,10 +499,10 @@ export function createPersistentStore(env) {
   }
 
   async function createApproval(
-    approval
+    approval = {}
   ) {
     const id =
-      approval.id ||
+      approval.id ??
       crypto.randomUUID();
 
     if (!approval.taskId) {
@@ -424,7 +522,8 @@ export function createPersistentStore(env) {
       taskId:
         approval.taskId,
       payload:
-        approval.payload ?? {}
+        approval.payload ??
+        {}
     };
 
     await database.execute(
@@ -440,13 +539,23 @@ export function createPersistentStore(env) {
         created_at,
         resolved_at
       )
-      VALUES (?, ?, ?, ?, ?, 'pending', NULL, datetime('now'), NULL)
+      VALUES (
+        ?,
+        ?,
+        ?,
+        ?,
+        ?,
+        'pending',
+        NULL,
+        datetime('now'),
+        NULL
+      )
       `,
       id,
-      approval.requestedBy ||
+      approval.requestedBy ??
         "agent",
       approval.action,
-      approval.description ||
+      approval.description ??
         "",
       json(metadata)
     );
@@ -461,11 +570,18 @@ export function createPersistentStore(env) {
       );
     }
 
-    return normalizeApproval(
+    const row =
       await database.first(
-        `SELECT * FROM approvals WHERE id = ?`,
+        `
+        SELECT *
+        FROM approvals
+        WHERE id = ?
+        `,
         id
-      )
+      );
+
+    return normalizeApproval(
+      row
     );
   }
 
@@ -495,11 +611,16 @@ export function createPersistentStore(env) {
     await database.execute(
       `
       UPDATE approvals
-      SET status = ?, resolved_by = ?, resolved_at = datetime('now')
-      WHERE id = ? AND status = 'pending'
+      SET
+        status = ?,
+        resolved_by = ?,
+        resolved_at = datetime('now')
+      WHERE
+        id = ?
+        AND status = 'pending'
       `,
       status,
-      resolvedBy ||
+      resolvedBy ??
         "system",
       id
     );
@@ -511,17 +632,17 @@ export function createPersistentStore(env) {
     limit = 50
   ) {
     const safeLimit =
-      Math.min(
-        Math.max(
-          Number(limit) || 50,
-          1
-        ),
-        200
-      );
+      normalizeLimit(limit);
 
     const rows =
       await database.all(
-        `SELECT * FROM approvals WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?`,
+        `
+        SELECT *
+        FROM approvals
+        WHERE status = 'pending'
+        ORDER BY created_at ASC
+        LIMIT ?
+        `,
         safeLimit
       );
 
